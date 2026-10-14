@@ -139,6 +139,12 @@ namespace UltraVPN
     // =================================================================
     static class Dados
     {
+        // SERVIDOR DE CONFIANCA para a conexao automatica ao ligar o Windows
+        // (opcao "Conectar ao iniciar com o Windows"): se ele estiver na lista,
+        // e nele que o programa conecta; se nao estiver, cai no primeiro
+        // servidor disponivel como sempre.
+        public const string ServidorPreferidoIp = "181.117.92.157";
+
         // AMERICA DO SUL, E SO - E SEM O BRASIL. Ficam 12 paises: Argentina,
         // Uruguai, Paraguai, Chile, Peru, Colombia, Bolivia, Equador,
         // Venezuela, Guiana, Suriname e Guiana Francesa.
@@ -2652,6 +2658,7 @@ public static string UrbanGetServers(string accsToken)
             btnConnect.Paint += PintarBotaoConectar;
             btnConnect.Click += delegate
             {
+                conectarPreferida = false;   // escolha do usuario vale mais
                 if (connected) Desconectar();
                 else Conectar();
             };
@@ -2934,6 +2941,7 @@ public static string UrbanGetServers(string accsToken)
                 if (connected) return;
                 if (!btnConnect.Enabled) return;
                 Log("Conectando autom\u00e1tico (op\u00e7\u00e3o \"Conectar ao iniciar com o Windows\").");
+                conectarPreferida = true;   // procura a servidora de confianca primeiro
                 Conectar();
             };
             connTimer = new System.Windows.Forms.Timer();
@@ -5700,6 +5708,37 @@ public static string UrbanGetServers(string accsToken)
         // adaptador ("could not talk to service").
         bool servicoSubiuPorNos = false;
 
+        // marcado quando a conexao vem do boot (opcao "Conectar ao iniciar com
+        // o Windows"): o FluxoConectar procura antes a servidora de confianca.
+        // Um clique em CONECTAR desmarca - a escolha do usuario vale mais.
+        bool conectarPreferida = false;
+
+        // Procura na lista a servidora de confianca (Dados.ServidorPreferidoIp)
+        // para a conexao automatica ao ligar o Windows. Acha: seleciona ela na
+        // tela (o usuario ve em qual vai). Nao acha: nao seleciona nada aqui e
+        // o FluxoConectar cai no primeiro da lista, como sempre fez.
+        // SO roda na thread da janela (chamada de dentro de BeginInvoke).
+        void EscolherPreferida()
+        {
+            try
+            {
+                if (lv.Items.Count == 0) return;
+                foreach (ListViewItem it in lv.Items)
+                {
+                    var sv = it.Tag as Servidor;
+                    if (sv == null) continue;
+                    if (sv.IP != Dados.ServidorPreferidoIp) continue;
+                    it.Selected = true;
+                    it.Focused = true;
+                    lv.EnsureVisible(it.Index);
+                    Log("Servidora preferida encontrada: " + sv.Name + " (" + sv.IP + ":" + sv.Port + ").");
+                    return;
+                }
+                Log("Servidora preferida (" + Dados.ServidorPreferidoIp + ") nao esta na lista - usando outra.");
+            }
+            catch { }
+        }
+
         void LigarServicoOpenVpn()
         {
             try
@@ -5753,6 +5792,7 @@ public static string UrbanGetServers(string accsToken)
             BeginInvoke((Action)delegate
             {
                 escolhaManual = (lv.SelectedItems.Count > 0);
+                if (!escolhaManual && conectarPreferida) EscolherPreferida();
                 if (!escolhaManual && lv.Items.Count > 0)
                 {
                     try { lv.Items[0].Selected = true; lv.EnsureVisible(0); } catch { }
