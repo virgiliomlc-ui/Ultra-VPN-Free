@@ -6161,7 +6161,7 @@ public static string UrbanGetServers(string accsToken)
                 var msi = LocalizarMsiOpenVpn();
                 if (msi == null)
                 {
-                    Log("OpenVPN nao encontrado e o instalador nao veio embutido neste .exe.");
+                    Log("OpenVPN nao encontrado e nao achei o instalador embutido neste .exe (nem do lado dele).");
                     return;
                 }
                 Log("Preparando o cliente OpenVPN (primeira vez: leva alguns segundos)...");
@@ -6193,10 +6193,21 @@ public static string UrbanGetServers(string accsToken)
 
         string LocalizarMsiOpenVpn()
         {
+            // 1) DENTRO DO PROPRIO EXE - este e o caminho normal. O build.bat
+            //    embute o .msi como recurso "uvpn.openvpn.msi", entao o programa
+            //    se instala sozinho SEM depender do nome do arquivo, de pasta
+            //    _clients ou de qualquer arquivo solto do lado.
+            try
+            {
+                var meu = ExtrairMsiDoAssembly(System.Reflection.Assembly.GetExecutingAssembly());
+                if (meu != null) return meu;
+            }
+            catch { }
+
+            // 2) instalador solto do lado do programa
             try
             {
                 var dir = AppDomain.CurrentDomain.BaseDirectory;
-                // 1) instalador solto do lado do programa
                 foreach (var sub in new[] { "_clients", ".", ".." })
                 {
                     foreach (var n in new[] { "OpenVPN-2.7.8-I001-amd64.msi", "uvpn.openvpn.msi" })
@@ -6209,10 +6220,17 @@ public static string UrbanGetServers(string accsToken)
                         catch { }
                     }
                 }
-                // 2) dentro do exe do app principal (ele embute o instalador)
+            }
+            catch { }
+
+            // 3) outra copia do programa em disco (quem ainda tem o nome antigo)
+            try
+            {
+                string meuCaminho = "";
+                try { meuCaminho = Path.GetFullPath(System.Reflection.Assembly.GetExecutingAssembly().Location); } catch { }
                 var exes = new List<string>();
                 var pastas = new List<string>();
-                try { pastas.Add(Path.GetDirectoryName(Path.GetFullPath(dir))); } catch { }
+                try { pastas.Add(Path.GetDirectoryName(Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory))); } catch { }
                 pastas.Add(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
                 pastas.Add(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
                 foreach (var pasta in pastas)
@@ -6220,8 +6238,9 @@ public static string UrbanGetServers(string accsToken)
                     if (String.IsNullOrEmpty(pasta) || !Directory.Exists(pasta)) continue;
                     try
                     {
-                        foreach (var f in Directory.GetFiles(pasta, "UltraVPNFree.exe", SearchOption.AllDirectories))
+                        foreach (var f in Directory.GetFiles(pasta, "UltraVPNFree*.exe", SearchOption.AllDirectories))
                         {
+                            try { if (meuCaminho.Length > 0 && Path.GetFullPath(f).Equals(meuCaminho, StringComparison.OrdinalIgnoreCase)) continue; } catch { }
                             exes.Add(f);
                             if (exes.Count >= 3) break;
                         }
@@ -6243,8 +6262,18 @@ public static string UrbanGetServers(string accsToken)
         {
             try
             {
-                var bytes = File.ReadAllBytes(exe);
-                var asm = System.Reflection.Assembly.Load(bytes);
+                return ExtrairMsiDoAssembly(System.Reflection.Assembly.Load(File.ReadAllBytes(exe)));
+            }
+            catch { return null; }
+        }
+
+        // tira o .msi de dentro do assembly e joga no temp. se o recurso nao
+        // existir, ou sair menor que o instalador real, devolve null.
+        string ExtrairMsiDoAssembly(System.Reflection.Assembly asm)
+        {
+            try
+            {
+                if (asm == null) return null;
                 if (Array.IndexOf(asm.GetManifestResourceNames(), "uvpn.openvpn.msi") < 0) return null;
                 var destino = Path.Combine(Path.GetTempPath(), "uvpn_openvpn.msi");
                 using (var entrada = asm.GetManifestResourceStream("uvpn.openvpn.msi"))
@@ -6253,6 +6282,7 @@ public static string UrbanGetServers(string accsToken)
                     using (var saida = File.Create(destino)) entrada.CopyTo(saida);
                 }
                 if (!File.Exists(destino)) return null;
+                if (new FileInfo(destino).Length < 1000000) return null;   // extraiu lixo
                 msiOpenVpnTemp = destino;
                 return destino;
             }
