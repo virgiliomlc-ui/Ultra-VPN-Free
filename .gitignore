@@ -1,0 +1,11 @@
+# --- build ---
+UltraVPNFree.exe
+*.pdb
+
+# --- instalador de terceiro (OpenVPN Community, 5,9 MB) ---
+# baixado pelo build, nao versionado
+res/OpenVPN-*.msi
+
+# --- dados de execucao ---
+*.log
+*.cache
