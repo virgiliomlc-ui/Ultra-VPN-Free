@@ -39,7 +39,7 @@ namespace UltraVPN
     // =================================================================
     static class Program
     {
-        public const string Versao = "1.2.0";
+        public const string Versao = "1.3.0";
         public static Mutex Instancia;
         public static bool TrayStart = false;    // -Tray  : abre na bandeja
         public static bool AutoStart = false;    // -Auto  : abre e conecta
