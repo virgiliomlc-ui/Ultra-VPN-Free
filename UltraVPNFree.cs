@@ -209,6 +209,12 @@ namespace UltraVPN
         public static readonly string[] TemaTexts = new string[] { "Tema Dos ETS", "Tema Escuro", "Goku Instinto Superior" };
 
         public const string ApiUrl = "https://www.vpngate.net/api/iphone/";
+        // ESPELHO DE RESERVA do VPN Gate: os mesmos servidores, republicados
+        // num repositorio GitHub que e atualizado o tempo todo. Se o
+        // vpngate.net cair ou ficar lento, a lista continua vindo de la.
+        // O arquivo tem os mesmos campos do CSV do VPN Gate (e o .ovpn em
+        // base64 junto), entao o programa trata igual.
+        public const string EspelhoUrl = "https://raw.githubusercontent.com/9xN/auto-ovpn/main/json/data.json";
         public const string PvlUrl = "https://publicvpnlist.com";
         public const string TlxUrl = "https://telexy.net/api/v1";
         public const string VpnBookUser = "vpnbook";
@@ -642,6 +648,100 @@ namespace UltraVPN
                 if (c != 0) return c;
                 return b.Score.CompareTo(a.Score);
             });
+            return saida;
+        }
+
+        // proto/porta de dentro do .ovpn (mesma regra do ConvertToServers)
+        static void ExtrairProtoPorta(string cfgB64, out string proto, out int porta)
+        {
+            proto = ""; porta = 0;
+            if (!Regex.IsMatch(cfgB64 ?? "", "^[A-Za-z0-9+/=]{60,}$")) return;
+            try
+            {
+                var txt = Encoding.UTF8.GetString(Convert.FromBase64String(cfgB64));
+                var prots = new List<string>();
+                foreach (Match pm in Regex.Matches(txt, @"(?m)^\s*proto\s+(\w+)"))
+                {
+                    var v = pm.Groups[1].Value.ToLowerInvariant();
+                    if (v != "tcp-server" && v != "udp-server" && !prots.Contains(v)) prots.Add(v);
+                }
+                if (prots.Count > 1) proto = "both";
+                else if (prots.Count == 1) proto = prots[0];
+                var rm = Regex.Match(txt, @"(?m)^\s*remote\s+\S+\s+(\d{1,5})");
+                if (rm.Success) porta = int.Parse(rm.Groups[1].Value);
+            }
+            catch { proto = ""; porta = 0; }
+        }
+
+        // ---------------- espelho GitHub do VPN Gate (reserva) ----------------
+        // O data.json tem os mesmos servidores do VPN Gate (mesmos campos, com
+        // o .ovpn em base64 junto). So entra America do Sul sem o Brasil, como
+        // sempre - e com Src "gate", para fundir com os do VPN Gate na hora de
+        // juntar: o mesmo IP:porta vindo dos dois vira uma linha so.
+        public static List<Servidor> ParseEspelhoJson(string json)
+        {
+            var saida = new List<Servidor>();
+            if (String.IsNullOrWhiteSpace(json)) return saida;
+            try
+            {
+                // a raiz e uma lista; cada item que tiver "servers" vale.
+                // Se um dia a raiz virar o objeto direto, vale tambem.
+                var itens = new List<object>();
+                var arr = Js.Deserialize<IEnumerable>(json);
+                if (arr != null) foreach (object o in arr) itens.Add(o);
+                if (itens.Count == 0)
+                {
+                    var obj = Js.Deserialize<Dictionary<string, object>>(json);
+                    if (obj != null) itens.Add(obj);
+                }
+                foreach (object o in itens)
+                {
+                    var d = o as Dictionary<string, object>;
+                    if (d == null || !d.ContainsKey("servers")) continue;
+                    var srv = d["servers"] as IEnumerable;
+                    if (srv == null) continue;
+                    foreach (object os in srv)
+                    {
+                        var s = os as Dictionary<string, object>;
+                        if (s == null) continue;
+                        Func<string, string> campo = delegate(string k)
+                        {
+                            try { if (s.ContainsKey(k) && s[k] != null) return s[k].ToString(); } catch { }
+                            return "";
+                        };
+                        var iso = campo("countryshort").ToUpperInvariant();
+                        if (Array.IndexOf(Dados.LatAmOrder, iso) < 0) continue;
+                        var ip = campo("ip");
+                        if (String.IsNullOrEmpty(ip)) continue;
+                        var cfgB64 = campo("openvpn_configdata_base64");
+                        if (!Regex.IsMatch(cfgB64, "^[A-Za-z0-9+/=]{60,}$")) continue;   // sem .ovpn nao serve
+                        int pingVal = 0; long speedVal = 0; int sessVal = 0; long scoreVal = 0;
+                        int.TryParse(campo("ping"), out pingVal);
+                        long.TryParse(campo("speed"), out speedVal);
+                        int.TryParse(campo("numvpnsessions"), out sessVal);
+                        long.TryParse(campo("score"), out scoreVal);
+                        string proto; int porta;
+                        ExtrairProtoPorta(cfgB64, out proto, out porta);
+                        saida.Add(new Servidor
+                        {
+                            Host = campo("hostname"),
+                            IP = ip,
+                            Name = Dados.GetCountryName(iso),
+                            ISO = iso,
+                            Ping = pingVal,
+                            Speed = speedVal,
+                            Sessions = sessVal,
+                            Score = scoreVal,
+                            Measured = -1,
+                            Proto = proto,
+                            Port = porta,
+                            Src = "gate",
+                            Cfg = cfgB64
+                        });
+                    }
+                }
+            }
+            catch { }
             return saida;
         }
 
@@ -2364,6 +2464,9 @@ public static string UrbanGetServers(string accsToken)
         DateTime dlStart = DateTime.MinValue;
         int dlTentativas = 0;
         DateTime? dlReTimeout = null;
+        // o espelho GitHub baixa em paralelo com o VPN Gate
+        Task<string> dlEspelho = null;
+        DateTime dlEspStart = DateTime.MinValue;
         class PvlTarefa { public Task<string> T; public string ISO; public string Tipo; public WebClient W; public DateTime Start; }
         List<PvlTarefa> pvlTasks = new List<PvlTarefa>();
         List<PvlTarefa> pvlQueue = new List<PvlTarefa>();
@@ -4507,6 +4610,7 @@ public static string UrbanGetServers(string accsToken)
                 catch { }
             };
             foreach (var s in gateServers) entrar(s);
+            foreach (var s in gateEspelho) entrar(s);   // reserva: mesmos servidores por outro caminho
             foreach (var s in pvlServers) entrar(s);
             foreach (var s in vpnBookServers) entrar(s);
             foreach (var s in urbanServers) entrar(s);
@@ -4805,6 +4909,18 @@ public static string UrbanGetServers(string accsToken)
             dlStart = DateTime.Now;
             var wc = Rede.NovoWc();
             dlTask = wc.DownloadStringTaskAsync(new Uri(Dados.ApiUrl));
+            // o espelho vai junto, em paralelo: se o vpngate.net cair ou ficar
+            // lento, a lista continua vindo do GitHub sem ninguem notar
+            try
+            {
+                if (dlEspelho == null || dlEspelho.IsCompleted)
+                {
+                    var wc2 = Rede.NovoWc();
+                    dlEspStart = DateTime.Now;
+                    dlEspelho = wc2.DownloadStringTaskAsync(new Uri(Dados.EspelhoUrl));
+                }
+            }
+            catch { }
             return true;
         }
 
@@ -5303,6 +5419,26 @@ public static string UrbanGetServers(string accsToken)
                 Log("Tempo esgotado ao baixar a lista. Tente Atualizar de novo.");
             }
 
+            // espelho GitHub terminou?
+            if (dlEspelho != null && dlEspelho.IsCompleted)
+            {
+                var te = dlEspelho;
+                dlEspelho = null;
+                dlEspStart = DateTime.MinValue;
+                try
+                {
+                    if (te.IsFaulted) throw te.Exception.GetBaseException();
+                    AplicarEspelho(te.Result);
+                }
+                catch { /* o VPN Gate segue valendo sozinho; sem barulho no log */ }
+            }
+
+            // nunca deixa o download do espelho pendurado
+            if (dlEspelho != null && dlEspStart != DateTime.MinValue && (DateTime.Now - dlEspStart).TotalSeconds > 60)
+            {
+                dlEspelho = null; dlEspStart = DateTime.MinValue;
+            }
+
             // IP externo terminou?
             if (ipTask != null && ipTask.IsCompleted)
             {
@@ -5347,16 +5483,37 @@ public static string UrbanGetServers(string accsToken)
             if (!String.IsNullOrWhiteSpace(raw)) gateRaw = raw;
             if (salvar && !String.IsNullOrWhiteSpace(raw)) Store.WriteCache(raw);
             gateServers = sv;
+            CombinarGate(totalGate, sv.Count, -1);
+        }
+        int gateUltimoGate = 0;
+        int gateUltimoEspelho = -1;
+        List<Servidor> gateEspelho = new List<Servidor>();
+
+        // espelho GitHub chegou: guarda e remonta a lista junto com o VPN Gate
+        void AplicarEspelho(string json)
+        {
+            gateEspelho = Rede.ParseEspelhoJson(json);
+            CombinarGate(-1, -1, gateEspelho.Count);
+        }
+
+        // junta VPN Gate + espelho GitHub e monta a tela. O mesmo IP:porta
+        // vindo dos dois vira uma linha so na fusao (o JuntarListas junta por
+        // IP:porta), entao buscar nos dois nao duplica nada: so garante que a
+        // lista chega mesmo quando um dos dois esta fora do ar.
+        void CombinarGate(int totalGate, int nPrincipal, int nEspelho)
+        {
             JuntarListas();
             try
             {
-                if (sv.Count > gateUltimoGate)
-                    Log("VPN Gate: " + sv.Count + " servidores da America Latina entraram (de " + totalGate + " que ele mandou do mundo inteiro).");
-                gateUltimoGate = sv.Count;
+                if (nPrincipal >= 0 && nPrincipal > gateUltimoGate)
+                    Log("VPN Gate: " + nPrincipal + " servidores da America Latina entraram (de " + totalGate + " que ele mandou do mundo inteiro).");
+                if (nPrincipal >= 0) gateUltimoGate = nPrincipal;
+                if (nEspelho > 0 && nEspelho != gateUltimoEspelho)
+                    Log("Espelho GitHub: " + nEspelho + " servidores da America Latina (reserva do VPN Gate, sem precisar dele).");
+                if (nEspelho >= 0) gateUltimoEspelho = nEspelho;
             }
             catch { }
         }
-        int gateUltimoGate = 0;
 
         // ---------------- cache das fontes publicas ----------------
         void SalvarPvlCache()
