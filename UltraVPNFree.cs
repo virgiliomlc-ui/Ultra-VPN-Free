@@ -6186,9 +6186,17 @@ public static string UrbanGetServers(string accsToken)
                 // SEM dedupe por IP: cada servidor da lista entra como
                 // candidato. Duas linhas do mesmo IP com portas diferentes sao
                 // endpoints diferentes e valem as duas.
+                // A unica coisa barrada e o MESMO objeto entrando duas vezes:
+                // os fixos entram primeiro (por causa da cura e da prioridade) e
+                // depois entravam de novo pela varredura geral da lista, e o
+                // resultado era a mesma linha na fila duas vezes - a cura
+                // rodava dobrada e um candidato ficava com duas tentativas.
+                var jaEntrou = new HashSet<Servidor>();
                 Action<Servidor> add = delegate(Servidor c)
                 {
-                    if (c != null && !String.IsNullOrEmpty(c.IP)) cand.Add(c);
+                    if (c == null || String.IsNullOrEmpty(c.IP)) return;
+                    if (!jaEntrou.Add(c)) return;
+                    cand.Add(c);
                 };
                 List<Servidor> daLista = null;
                 BeginInvoke((Action)delegate
