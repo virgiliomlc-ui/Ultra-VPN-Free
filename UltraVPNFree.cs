@@ -128,6 +128,11 @@ namespace UltraVPN
         // este registro vem do disco (pasta "fixos"): o .ovpn ja abriu tunel
         // neste PC antes e nao depende de nenhuma fonte online
         public bool Fixo = false;
+        // cidade REAL informada pela fonte (o telexy manda "Olivos", "Colina",
+        // "Capiibary"...). Vem do dado, nao de lista escrita a mao: e por isso
+        // que nao existe mais nenhum servidor com nome de cidade fixo no
+        // codigo - quando a fonte sabe, mostra o que ela mediu.
+        public string Cidade = "";
     }
 
     public class Programa
@@ -142,11 +147,11 @@ namespace UltraVPN
     // =================================================================
     static class Dados
     {
-        // SERVIDOR DE CONFIANCA para a conexao automatica ao ligar o Windows
-        // (opcao "Conectar ao iniciar com o Windows"): se ele estiver na lista,
-        // e nele que o programa conecta; se nao estiver, cai no primeiro
-        // servidor disponivel como sempre.
-        public const string ServidorPreferidoIp = "181.117.92.157";
+        // NAO EXISTE MAIS SERVIDOR DE CONFIANCA. Antes o 181.117.92.157 era
+        // escolhido a forcana na conexao automatica do boot, enquanto todos os
+        // outros seguiam a ordem normal (melhor ping). Hoje nenhum servidor e
+        // especial: a conexao do boot usa exatamente a mesma regra de qualquer
+        // outra - primeiro o de melhor ping que estiver de pe.
 
         // AMERICA DO SUL, E SO - E SEM O BRASIL. Ficam 12 paises: Argentina,
         // Uruguai, Paraguai, Chile, Peru, Colombia, Bolivia, Equador,
@@ -164,11 +169,16 @@ namespace UltraVPN
             {"CO","Colombia"}, {"BO","Bolivia"}, {"EC","Equador"}, {"VE","Venezuela"}, {"GY","Guiana"},
             {"SR","Suriname"}, {"GF","Guiana Francesa"} };
 
-        // cidade/local conhecido de cada servidor (medido em 08/10/2026) - so
-        // America do Sul sem o Brasil
+        // cidade/local de cada servidor - so America do Sul sem o Brasil.
+        // ATENCAO: isto e so uma REDE DE RESERVA. A cidade que aparece na tela
+        // vem do dado que a fonte manda (Servidor.Cidade), que e medido e se
+        // atualiza sozinho. Antes o 181.117.92.157 estava escrito aqui como
+        // "Buenos Aires", o que era errado (o telexy mede que ele e de Olivos);
+        // em vez de corrigir a mao, a anotacao foi embora e o nome passou a
+        // vir da fonte, que nao erra desse jeito.
         public static readonly Dictionary<string, string> ServidorCidade = new Dictionary<string, string> {
             {"181.46.9.205","Ituzaingo (Buenos Aires)"}, {"181.87.91.13","El Talar (Buenos Aires)"},
-            {"181.117.92.157","Buenos Aires"}, {"186.122.0.49","Villa Nueva (Mendoza)"},
+            {"186.122.0.49","Villa Nueva (Mendoza)"},
             {"152.230.202.21","Colina (Santiago)"},
             {"38.253.148.178","Lima"}, {"190.117.30.185","Mariano Melgar (Arequipa)"},
             {"181.199.60.152","Quito"} };
@@ -311,7 +321,11 @@ namespace UltraVPN
         }
         public static string GetServerLocal(Servidor s)
         {
+            // 1) a cidade que a FONTE mandou (dado medido, sempre atualizado)
+            if (!String.IsNullOrWhiteSpace(s.Cidade)) return s.Cidade;
+            // 2) a anotada a mao, so quando a fonte nao sabe
             if (ServidorCidade.ContainsKey(s.IP)) return ServidorCidade[s.IP];
+            // 3) sem cidade: mostra so o pais
             return GetCountryName(s.ISO);
         }
     }
@@ -473,6 +487,7 @@ namespace UltraVPN
                 m["porta"] = portaAcerto > 0 ? portaAcerto : s.Port;
                 m["iso"] = s.ISO;
                 m["nome"] = s.Name;
+                m["cidade"] = s.Cidade;
                 m["proto"] = String.IsNullOrEmpty(protoAcerto) ? s.Proto : protoAcerto;
                 m["cid"] = s.Cid;
                 m["url"] = s.CfgUrl;
@@ -550,6 +565,7 @@ namespace UltraVPN
                             ISO = d.ContainsKey("iso") && d["iso"] != null ? d["iso"].ToString() : "",
                             Name = d.ContainsKey("nome") && d["nome"] != null ? d["nome"].ToString() : "",
                             Proto = d.ContainsKey("proto") && d["proto"] != null ? d["proto"].ToString() : "",
+                            Cidade = d.ContainsKey("cidade") && d["cidade"] != null ? d["cidade"].ToString() : "",
                             Cid = d.ContainsKey("cid") && d["cid"] != null ? d["cid"].ToString() : "",
                             Src = "fixo",
                             Cfg = Convert.ToBase64String(new UTF8Encoding(false).GetBytes(cfg)),   // o .ovpn local, em base64 como o campo espera: nao depende de download
@@ -806,6 +822,11 @@ namespace UltraVPN
                         }
                     }
                     if (d.ContainsKey("healthScore")) double.TryParse(d["healthScore"].ToString(), out health);
+                    // a cidade que a fonte mediu ("Olivos", "Colina",
+                    // "Capiibary"...): e daqui que sai o nome da tela, sem
+                    // lista escrita a mao
+                    var cidade = "";
+                    if (d.ContainsKey("city") && d["city"] != null) cidade = d["city"].ToString().Trim();
                     var dId = "";
                     if (d.ContainsKey("id") && d["id"] != null) dId = d["id"].ToString();
                     // uptime do servidor (o telexy mede direto nele)
@@ -848,6 +869,7 @@ namespace UltraVPN
                             Measured = -1,
                             Proto = transport,
                             Port = porta,
+                            Cidade = cidade,
                             Src = "tlx",
                             Cid = dId,
                             CfgUrl = cfgUrl
@@ -2945,7 +2967,6 @@ public static string UrbanGetServers(string accsToken)
             btnConnect.Paint += PintarBotaoConectar;
             btnConnect.Click += delegate
             {
-                conectarPreferida = false;   // escolha do usuario vale mais
                 if (connected) Desconectar();
                 else Conectar();
             };
@@ -3230,7 +3251,6 @@ public static string UrbanGetServers(string accsToken)
                 if (!btnConnect.Enabled) return;
                 if (conectando != 0) return;        // ja ha conexao correndo
                 Log("Conectando autom\u00e1tico (op\u00e7\u00e3o \"Conectar ao iniciar com o Windows\").");
-                conectarPreferida = true;   // procura a servidora de confianca primeiro
                 Conectar();
             };
             connTimer = new System.Windows.Forms.Timer();
@@ -4637,6 +4657,9 @@ public static string UrbanGetServers(string accsToken)
                     if (String.IsNullOrEmpty(tem.Proto) && !String.IsNullOrEmpty(s.Proto)) tem.Proto = s.Proto;
                     if (tem.Port <= 0 && s.Port > 0) tem.Port = s.Port;
                     if (s.Fixo) { tem.Fixo = true; if (s.OvpnOk) tem.OvpnOk = true; }
+                    // a cidade medida por qualquer das fontes vale: e melhor
+                    // mostrar o nome de quem sabe do que o pais sozinho
+                    if (String.IsNullOrEmpty(tem.Cidade) && !String.IsNullOrEmpty(s.Cidade)) tem.Cidade = s.Cidade;
                     if (tem.Speed <= 0 && s.Speed > 0) tem.Speed = s.Speed;
                     if (tem.Measured < 0 && s.Measured >= 0) tem.Measured = s.Measured;
                     // o .ovpn guardado e reaproveitado (nao se redesenha)
@@ -6053,36 +6076,9 @@ public static string UrbanGetServers(string accsToken)
         // adaptador ("could not talk to service").
         bool servicoSubiuPorNos = false;
 
-        // marcado quando a conexao vem do boot (opcao "Conectar ao iniciar com
-        // o Windows"): o FluxoConectar procura antes a servidora de confianca.
-        // Um clique em CONECTAR desmarca - a escolha do usuario vale mais.
-        bool conectarPreferida = false;
-
-        // Procura na lista a servidora de confianca (Dados.ServidorPreferidoIp)
-        // para a conexao automatica ao ligar o Windows. Acha: seleciona ela na
-        // tela (o usuario ve em qual vai). Nao acha: nao seleciona nada aqui e
-        // o FluxoConectar cai no primeiro da lista, como sempre fez.
-        // SO roda na thread da janela (chamada de dentro de BeginInvoke).
-        void EscolherPreferida()
-        {
-            try
-            {
-                if (lv.Items.Count == 0) return;
-                foreach (ListViewItem it in lv.Items)
-                {
-                    var sv = it.Tag as Servidor;
-                    if (sv == null) continue;
-                    if (sv.IP != Dados.ServidorPreferidoIp) continue;
-                    it.Selected = true;
-                    it.Focused = true;
-                    lv.EnsureVisible(it.Index);
-                    Log("Servidora preferida encontrada: " + sv.Name + " (" + sv.IP + ":" + sv.Port + ").");
-                    return;
-                }
-                Log("Servidora preferida (" + Dados.ServidorPreferidoIp + ") nao esta na lista - usando outra.");
-            }
-            catch { }
-        }
+        // NENHUM servidor e especial na conexao automatica do boot. A conexao
+        // do boot e a de qualquer clique: pega o primeiro da lista (que e o de
+        // melhor ping), e o failover cuida se ele nao responder.
 
         void LigarServicoOpenVpn()
         {
@@ -6137,7 +6133,8 @@ public static string UrbanGetServers(string accsToken)
             BeginInvoke((Action)delegate
             {
                 escolhaManual = (lv.SelectedItems.Count > 0);
-                if (!escolhaManual && conectarPreferida) EscolherPreferida();
+                // sem escolha na tela: vai no primeiro da lista, que e o de
+                // melhor ping. Vale tanto para o boot quanto para o clique.
                 if (!escolhaManual && lv.Items.Count > 0)
                 {
                     try { lv.Items[0].Selected = true; lv.EnsureVisible(0); } catch { }
