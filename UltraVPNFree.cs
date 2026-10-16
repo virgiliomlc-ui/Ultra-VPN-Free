@@ -167,18 +167,20 @@ namespace UltraVPN
             {"SR","Suriname"}, {"GF","Guiana Francesa"} };
 
         // cidade/local de cada servidor - so America do Sul sem o Brasil.
-        // ATENCAO: isto e so uma REDE DE RESERVA. A cidade que aparece na tela
-        // vem do dado que a fonte manda (Servidor.Cidade), que e medido e se
-        // atualiza sozinho. Antes o 181.117.92.157 estava escrito aqui como
-        // "Buenos Aires", o que era errado (o telexy mede que ele e de Olivos);
-        // em vez de corrigir a mao, a anotacao foi embora e o nome passou a
-        // vir da fonte, que nao erra desse jeito.
+        // ATENCAO: isto e so uma REDE DE RESERVA, e cada anotacao aqui foi
+        // conferida em 16/10/2026 contra geolocalizacao independente (cidade e
+        // regiao bateram). A cidade que aparece na tela vem do dado que a
+        // fonte manda (Servidor.Cidade) ou do que o programa aprendeu e gravou
+        // em cidades.json - os dois passam na frente desta tabela, e o arquivo
+        // se atualiza sozinho para sempre. O 181.199.60.152 saiu daqui de
+        // proposito: duas fontes discordam dele hoje (geolocalizacao diz
+        // Quito, telexy diz Santa Elena) e, na duvida, o programa mostra so o
+        // pais - que esta sempre certo - em vez de arriscar uma cidade.
         public static readonly Dictionary<string, string> ServidorCidade = new Dictionary<string, string> {
             {"181.46.9.205","Ituzaingo (Buenos Aires)"}, {"181.87.91.13","El Talar (Buenos Aires)"},
             {"186.122.0.49","Villa Nueva (Mendoza)"},
             {"152.230.202.21","Colina (Santiago)"},
-            {"38.253.148.178","Lima"}, {"190.117.30.185","Mariano Melgar (Arequipa)"},
-            {"181.199.60.152","Quito"} };
+            {"38.253.148.178","Lima"}, {"190.117.30.185","Mariano Melgar (Arequipa)"} };
 
         public static readonly string[] RegiaoSul = new string[] { "AR","UY","PY","CL","PE","CO","BO","EC","VE","GY","SR","GF" };
         // America Central, Norte e Caribe sairam da lista - nao ha mais grupo
@@ -318,11 +320,15 @@ namespace UltraVPN
         }
         public static string GetServerLocal(Servidor s)
         {
-            // 1) a cidade que a FONTE mandou (dado medido, sempre atualizado)
+            // 1) a cidade que a FONTE mandou agora (dado fresco, sempre vence)
             if (!String.IsNullOrWhiteSpace(s.Cidade)) return s.Cidade;
-            // 2) a anotada a mao, so quando a fonte nao sabe
+            // 2) a cidade que o programa aprendeu deste IP numa vez anterior
+            //    (gravada em cidades.json - se atualiza sozinha para sempre)
+            var apr = Store.CidadeAprendida(s.IP);
+            if (!String.IsNullOrWhiteSpace(apr)) return apr;
+            // 3) a anotada a mao, so quando ninguem sabe melhor
             if (ServidorCidade.ContainsKey(s.IP)) return ServidorCidade[s.IP];
-            // 3) sem cidade: mostra so o pais
+            // 4) sem cidade: mostra so o pais (sempre certo, nunca inventado)
             return GetCountryName(s.ISO);
         }
     }
@@ -449,6 +455,80 @@ namespace UltraVPN
                 File.WriteAllText(arq, txt, new UTF8Encoding(false));
             }
             catch { }
+        }
+
+        // ---------------- cidades aprendidas (cidades.json) ----------------
+        // O programa aprende sozinho o nome da cidade de cada IP: toda vez
+        // que uma fonte manda a cidade ("Olivos", "Colina"...), ela e gravada
+        // aqui. Na proxima vez que o MESMO ip aparecer por uma fonte que nao
+        // manda cidade (VPN Gate, Hunt, lista publica), o nome aprendido e
+        // usado em vez de cair para so o pais - e se a fonte mandar OUTRA
+        // cidade depois, a nova vence e o arquivo e atualizado. E assim que o
+        // nome da tela se mantem certo sozinho, para sempre, sem ninguem
+        // precisar corrigir tabela no codigo.
+        public static readonly string CidadesPath = Path.Combine(DirDados, "cidades.json");
+        static readonly object travaCidades = new object();
+        static Dictionary<string, string> cidadesAprendidas = null;
+        static List<string> ordemCidades = new List<string>();
+        static void AbrirCidades()
+        {
+            lock (travaCidades)
+            {
+                if (cidadesAprendidas != null) return;
+                cidadesAprendidas = new Dictionary<string, string>();
+                ordemCidades = new List<string>();
+                try
+                {
+                    if (!File.Exists(CidadesPath)) return;
+                    var lido = Js.Deserialize<Dictionary<string, string>>(File.ReadAllText(CidadesPath, Encoding.UTF8));
+                    if (lido == null) return;
+                    foreach (var kv in lido)
+                    {
+                        if (String.IsNullOrEmpty(kv.Key) || String.IsNullOrWhiteSpace(kv.Value)) continue;
+                        cidadesAprendidas[kv.Key] = kv.Value;
+                        ordemCidades.Add(kv.Key);
+                    }
+                }
+                catch { }
+            }
+        }
+        public static string CidadeAprendida(string ip)
+        {
+            if (String.IsNullOrEmpty(ip)) return "";
+            AbrirCidades();
+            lock (travaCidades)
+            {
+                string c;
+                if (cidadesAprendidas.TryGetValue(ip, out c)) return c ?? "";
+                return "";
+            }
+        }
+        public static void SalvarCidade(string ip, string cidade)
+        {
+            if (String.IsNullOrEmpty(ip) || String.IsNullOrWhiteSpace(cidade)) return;
+            cidade = cidade.Trim();
+            AbrirCidades();
+            lock (travaCidades)
+            {
+                try
+                {
+                    string tem;
+                    if (cidadesAprendidas.TryGetValue(ip, out tem) && tem == cidade) return;   // ja sabia
+                    cidadesAprendidas[ip] = cidade;
+                    ordemCidades.Remove(ip);
+                    ordemCidades.Add(ip);
+                    // teto: mapa de cidade nao pode crescer sem fim (os IPs
+                    // giram). Guarda as 200 mais recentes e apaga o resto.
+                    while (ordemCidades.Count > 200)
+                    {
+                        var velho = ordemCidades[0];
+                        ordemCidades.RemoveAt(0);
+                        cidadesAprendidas.Remove(velho);
+                    }
+                    File.WriteAllText(CidadesPath, Js.Serialize(cidadesAprendidas), new UTF8Encoding(false));
+                }
+                catch { }
+            }
         }
 
         // ---------------- portas aprendidas (portas.json) ----------------
@@ -4409,8 +4489,12 @@ public static string UrbanGetServers(string accsToken)
                     if (String.IsNullOrEmpty(tem.Proto) && !String.IsNullOrEmpty(s.Proto)) tem.Proto = s.Proto;
                     if (tem.Port <= 0 && s.Port > 0) tem.Port = s.Port;
                     // a cidade medida por qualquer das fontes vale: e melhor
-                    // mostrar o nome de quem sabe do que o pais sozinho
+                    // mostrar o nome de quem sabe do que o pais sozinho.
+                    // Aprende para sempre: gravada em cidades.json, na proxima
+                    // vez este IP ja entra com nome mesmo vindo de fonte que
+                    // nao manda cidade (VPN Gate, Hunt, lista publica).
                     if (String.IsNullOrEmpty(tem.Cidade) && !String.IsNullOrEmpty(s.Cidade)) tem.Cidade = s.Cidade;
+                    if (!String.IsNullOrEmpty(s.Cidade)) Store.SalvarCidade(s.IP, s.Cidade);
                     if (tem.Speed <= 0 && s.Speed > 0) tem.Speed = s.Speed;
                     if (tem.Measured < 0 && s.Measured >= 0) tem.Measured = s.Measured;
                     // o .ovpn guardado e reaproveitado (nao se redesenha)
