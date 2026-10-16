@@ -639,9 +639,6 @@ namespace UltraVPN
                     if (d.ContainsKey("city") && d["city"] != null) cidade = d["city"].ToString().Trim();
                     var dId = "";
                     if (d.ContainsKey("id") && d["id"] != null) dId = d["id"].ToString();
-                    // uptime do servidor (o telexy mede direto nele)
-                    double uptimePct = -1;
-                    if (d.ContainsKey("uptime")) double.TryParse(d["uptime"].ToString(), out uptimePct);
                     // o telexy entrega o .ovpn pronto por servidor: guarda o link
                     // para baixar na hora de conectar (senao o servidor tlx nunca
                     // teria configuracao e seria perdido)
@@ -654,16 +651,12 @@ namespace UltraVPN
                         var e = oe as Dictionary<string, object>;
                         if (e == null || !e.ContainsKey("host") || !e.ContainsKey("port")) continue;
                         if (e["host"] == null || e["port"] == null) continue;
-                        // IS-ONLINE: o telexy marca offline quando o probe
-                        // DELE falhou - mas ele mede de fora do Brasil e a
-                        // latencia dele passa de 1 s com facilidade. Servidor
-                        // de verdade adormecido tem uptime ALTO: esses
-                        // continuam entrando na lista (a conexao e barada
-                        // na hora pelo failover, e o .ovpn segue valendo).
-                        // So sai da lista quem o proprio telexy diz que esta
-                        // com uptime BAIXO de verdade.
-                        if (e.ContainsKey("isOnline") && e["isOnline"] is bool && !(bool)e["isOnline"]
-                            && uptimePct >= 0 && uptimePct < 50) continue;
+                        // o IS-ONLINE do telexy NAO e levado em conta: ele marca
+                        // offline quando o probe DELE falha (ele mede de fora do
+                        // Brasil), e quem decide se o servidor presta e a
+                        // tentativa de conexao - nao o palpite da fonte. Todo
+                        // servidor da America do Sul entra na lista, com
+                        // qualquer uptime, e o failover tenta um por um.
                         var transport = e.ContainsKey("transport") && e["transport"] != null ? e["transport"].ToString() : "udp";
                         int porta = 0; int.TryParse(e["port"].ToString(), out porta);
                         saida.Add(new Servidor
@@ -5873,14 +5866,12 @@ public static string UrbanGetServers(string accsToken)
 
         void FluxoConectar()
         {
-            bool escolhaManual = false;
             Servidor s = null;
             BeginInvoke((Action)delegate
             {
-                escolhaManual = (lv.SelectedItems.Count > 0);
                 // sem escolha na tela: vai no primeiro da lista, que e o de
                 // melhor ping. Vale tanto para o boot quanto para o clique.
-                if (!escolhaManual && lv.Items.Count > 0)
+                if (lv.SelectedItems.Count == 0 && lv.Items.Count > 0)
                 {
                     try { lv.Items[0].Selected = true; lv.EnsureVisible(0); } catch { }
                 }
@@ -5888,7 +5879,7 @@ public static string UrbanGetServers(string accsToken)
             });
             // espera a leitura da selecao
             for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
-            BeginInvoke((Action)delegate { escolhaManual = (lv.SelectedItems.Count > 0); if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag; });
+            BeginInvoke((Action)delegate { if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag; });
             for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
             if (s == null)
             {
@@ -5957,27 +5948,12 @@ public static string UrbanGetServers(string accsToken)
                 foreach (var c in mesmo.Concat(outros))
                     if (!temArquivo(c)) add(c);
 
-                // medicao rapida (1,4 s, todos de uma vez): quem esta vivo agora
-                var rtts = new Dictionary<string, int>();
-                try
-                {
-                    rtts = Rede.MedirRtts(cand.Take(10));
-                    var vivos = cand.Where(c =>
-                    {
-                        int m;
-                        if (!rtts.TryGetValue(c.IP, out m)) return true;  // nao medido = mantem
-                        return m >= 0;
-                    }).ToList();
-                    if (vivos.Count > 0)
-                    {
-                        int m0;
-                        if (escolhaManual && rtts.TryGetValue(s.IP, out m0) && m0 < 0)
-                            Log("O escolhido (" + s.Name + ") n\u00e3o respondeu agora - abro o pr\u00f3ximo vivo direto.");
-                        cand = vivos;
-                    }
-                    else { rtts = new Dictionary<string, int>(); cand.Insert(0, s); }
-                }
-                catch { }
+                // SEM medicao antes de conectar: a sonda rapida (1,4 s) descartava
+                // quem nao respondia na hora, e servidor lento ou de ping alto
+                // nem chegava a ser tentado. Agora a fila vale como esta -
+                // escolhido, mesmo pais, resto, com .ovpn primeiro - e cada um
+                // e tentado de verdade ate 6 tentativas. Quem abre o tunel
+                // decide, nao a sonda.
 
                 int tent = 0;
                 string ultimo = "";
