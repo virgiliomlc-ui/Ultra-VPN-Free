@@ -2525,9 +2525,6 @@ public static string UrbanGetServers(string accsToken)
         bool bootConnect = false;
         bool fullTunnel = false;
         int reAuto = 0;
-        bool teveConexaoAntes = false;
-        bool discordEstava = false;
-        string discordCaminho = "";
         string servidorAtual = "";
         string currentIP = "";
         string versaoNova = "";
@@ -6197,20 +6194,6 @@ public static string UrbanGetServers(string accsToken)
                 lblStatus.Text = "Status: conectando...";
                 btnConnect.Invalidate();
             });
-            // lembra o Discord ANTES de conectar
-            discordEstava = false;
-            discordCaminho = "";
-            try
-            {
-                var dpro = Process.GetProcessesByName("Discord");
-                if (dpro.Length > 0)
-                {
-                    discordEstava = true;
-                    try { discordCaminho = dpro[0].MainModule.FileName; } catch { }
-                }
-            }
-            catch { }
-
             try
             {
                 PararMotor();
@@ -6383,15 +6366,17 @@ public static string UrbanGetServers(string accsToken)
             if (connected)
             {
                 reAuto = 0;
-                teveConexaoAntes = true;
-                bool discordEra = discordEstava;
-                discordEstava = false;
-                // RECONEXAO/TROCA: Ctrl+R. FECHAR/ABRIR so na 1a conexao da sessao
-                if (discordEra)
+                // O DISCORD NAO E TOCADO: nem fecha/abre, nem Ctrl+R. Fechar o
+                // programa do usuario a forca e roubar o foco da tela com o
+                // Ctrl+R era pior do que esperar. Quando a VPN troca de servidor,
+                // as rotas passam a apontar para o gateway do tunel novo e o
+                // proprio Discord percebe a queda e reconecta sozinho.
+                try
                 {
-                    if (teveConexaoAntes && jaTeveAntes()) RecarregarDiscord();
-                    else ReiniciarDiscord();
+                    if (Process.GetProcessesByName("Discord").Length > 0)
+                        Log("Discord continua aberto - ele percebe a troca e reconecta sozinho pelo tunel novo (o texto volta em segundos).");
                 }
+                catch { }
             }
             else if (autoRecon && reAuto > 0)
             {
@@ -6400,7 +6385,6 @@ public static string UrbanGetServers(string accsToken)
             }
         }
 
-        bool jaTeveAntes() { return teveConexaoAntes && conexaoNumero > 1; }
         int conexaoNumero = 0;
 
         void Desconectar()
@@ -8260,74 +8244,11 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             catch { }
         }
 
-        // ============================================================
-        //  DISCORD (fechar/reabrir na 1a; Ctrl+R na reconexao/troca)
-        // ============================================================
-        void ReiniciarDiscord()
-        {
-            try
-            {
-                foreach (var p in Process.GetProcessesByName("Discord")) { try { p.CloseMainWindow(); } catch { } }
-                Thread.Sleep(800);
-                foreach (var p in Process.GetProcessesByName("Discord")) { try { p.Kill(); } catch { } }
-                Thread.Sleep(1200);
-                var caminho = discordCaminho;
-                if (String.IsNullOrEmpty(caminho) || !File.Exists(caminho))
-                {
-                    caminho = "";
-                    try
-                    {
-                        var baseD = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord");
-                        if (Directory.Exists(baseD))
-                        {
-                            var apps = Directory.GetDirectories(baseD, "app-*")
-                                .OrderByDescending(x => x).ToList();
-                            if (apps.Count > 0)
-                            {
-                                var cand = Path.Combine(apps[0], "Discord.exe");
-                                if (File.Exists(cand)) caminho = cand;
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                if (!String.IsNullOrEmpty(caminho) && File.Exists(caminho))
-                {
-                    Process.Start(caminho);
-                    Log("Discord fechou e reabriu j\u00e1 pela VPN (as conex\u00f5es dele recome\u00e7am no t\u00fanel).");
-                }
-                else Log("Discord foi fechado para refazer as conex\u00f5es pela VPN - abra ele de novo se quiser.");
-            }
-            catch { }
-        }
-
-        void RecarregarDiscord()
-        {
-            try
-            {
-                var procs = Process.GetProcessesByName("Discord");
-                if (procs.Length == 0) return;
-                Process alvo = null;
-                foreach (var p in procs) if (p.MainWindowHandle != IntPtr.Zero) { alvo = p; break; }
-                if (alvo == null)
-                {
-                    Log("Discord est\u00e1 na bandeja - fechando e reabrindo pelo t\u00fanel.");
-                    ReiniciarDiscord();
-                    return;
-                }
-                NativoA.SetForegroundWindow(alvo.MainWindowHandle);
-                Thread.Sleep(250);
-                SendKeys.SendWait("^r");
-                Log("Discord recarregado (Ctrl+R) - as conex\u00f5es dele recome\u00e7am pelo t\u00fanel.");
-            }
-            catch (Exception e) { Log("Ctrl+R no Discord falhou: " + e.Message); }
-        }
-
-        static class NativoA
-        {
-            [DllImport("user32.dll")]
-            public static extern bool SetForegroundWindow(IntPtr h);
-        }
+        // ANTES existiam aqui ReiniciarDiscord() e RecarregarDiscord(): na 1a
+        // conexao o programa FECHAVA o Discord e abria de novo, e a cada troca
+        // de servidor mandava Ctrl+R nele (roubando o foco da tela). Os dois
+        // sairam: quando a VPN troca de servidor, as rotas passam a apontar
+        // para o gateway do tunel novo e o proprio Discord reconecta sozinho.
 
         // ============================================================
         //  SELETOR DE PROGRAMA (janela propria, sem COM)
