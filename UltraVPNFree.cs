@@ -2540,6 +2540,9 @@ public static string UrbanGetServers(string accsToken)
         List<Servidor> urbanServers = new List<Servidor>();
         List<Servidor> servers = new List<Servidor>();
         List<Programa> appList = new List<Programa>();
+        // icones dos programas da lista, por caminho: extrair o icone do .exe a
+        // cada repaint trava a lista, entamo guarda em cache
+        readonly Dictionary<string, Icon> cacheIcones = new Dictionary<string, Icon>();
         string gateRaw = null;
         List<string> ownedRoutes = new List<string>();
         bool defRoute = false;
@@ -3556,8 +3559,44 @@ public static string UrbanGetServers(string accsToken)
             {
                 if (sel)
                     using (var brS4 = new SolidBrush(Color.FromArgb(77, 43, 115, 125))) g4.FillRectangle(brS4, r4);
+
+                // ICONE do proprio programa, tirado do .exe dele (o Discord
+                // mostra o logo, o Chrome mostra o logo). Cache por caminho:
+                // extrair icone a cada repaint trava a lista.
+                var nome = (string)lbApps.Items[index];
+                Icon ic = null;
+                try
+                {
+                    if (index >= 0 && index < appList.Count)
+                    {
+                        var cam = appList[index].Path;
+                        if (!String.IsNullOrEmpty(cam) && File.Exists(cam))
+                        {
+                            lock (cacheIcones)
+                            {
+                                if (!cacheIcones.TryGetValue(cam, out ic))
+                                {
+                                    try { ic = Icon.ExtractAssociatedIcon(cam); } catch { ic = null; }
+                                    cacheIcones[cam] = ic;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                int x = r4.X + 4;
+                if (ic != null)
+                {
+                    try
+                    {
+                        g4.DrawIcon(ic, new Rectangle(x, r4.Y + (r4.Height - 16) / 2, 16, 16));
+                        x += 21;
+                    }
+                    catch { }
+                }
                 using (var br4 = new SolidBrush(CorTexto))
-                    g4.DrawString((string)lbApps.Items[index], lbApps.Font, br4, new RectangleF(0, r4.Y, 4000, r4.Height), fmtCel);
+                    g4.DrawString(nome, lbApps.Font, br4, new RectangleF(x, r4.Y, 4000, r4.Height), fmtCel);
             }
             catch { }
         }
@@ -4940,7 +4979,7 @@ public static string UrbanGetServers(string accsToken)
             {
                 lbApps.Items.Clear();
                 foreach (var a in appList)
-                    lbApps.Items.Add(a.Name + "   [" + a.Path + "]");
+                    lbApps.Items.Add(a.Name);   // so o nome: o caminho fica de fora
             }
             finally { lbApps.EndUpdate(); }
             if (appList.Count == 0 && !fullTunnel)
