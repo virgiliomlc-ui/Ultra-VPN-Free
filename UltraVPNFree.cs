@@ -125,6 +125,9 @@ namespace UltraVPN
         // entra na lista - assim nao ha erro de conexao na primeira tentativa.
         public bool PortaOk = false;
         public bool OvpnOk = false;
+        // este registro vem do disco (pasta "fixos"): o .ovpn ja abriu tunel
+        // neste PC antes e nao depende de nenhuma fonte online
+        public bool Fixo = false;
     }
 
     public class Programa
@@ -327,6 +330,12 @@ namespace UltraVPN
         public static readonly string PvlCachePath = Path.Combine(DirDados, "pvl.cache");
         public static readonly string PortasPath = Path.Combine(DirDados, "portas.json");
         public static readonly string CfgDir = Path.Combine(DirDados, "cfg");
+        // SERVIDORES FIXOS: os .ovpn dos servidores que JA ABRIRAM TUNEL uma vez
+        // aqui neste PC. O VPN Gate muda a lista o tempo todo e o servidor sai
+        // de circulacao (alem do cache de 7 dias expirar) - mas o arquivo
+        // baixado continua valendo, entao ele e guardado aqui para sempre e
+        // volta a entrar na lista mesmo sem nenhuma fonte falando dele.
+        public static readonly string FixosDir = Path.Combine(DirDados, "fixos");
         public static readonly string ExePath = SafeExePath();
 
         static string SafeExePath()
@@ -340,6 +349,7 @@ namespace UltraVPN
             try { Directory.CreateDirectory(DirDados); } catch { }
             try { Directory.CreateDirectory(TempDir); } catch { }
             try { Directory.CreateDirectory(CfgDir); } catch { }
+            try { Directory.CreateDirectory(FixosDir); } catch { }
         }
 
         // ---------------- estado (state.json) ----------------
@@ -433,6 +443,161 @@ namespace UltraVPN
             {
                 var arq = Path.Combine(CfgDir, "bk_" + Regex.Replace(ip, "[^0-9]", "") + ".ovpn");
                 File.WriteAllText(arq, txt, new UTF8Encoding(false));
+            }
+            catch { }
+        }
+
+        // ---------------- SERVIDORES FIXOS ----------------
+        // Toda vez que um servidor ABRE o tunel, o .ovpn usado e gravado aqui
+        // (fixo_<ip>.ovpn + fixo_<ip>.txt com os dados do servidor). Nada
+        // expira e nada e apagado: e a copia que garante o servidor na lista
+        // quando o VPN Gate o tira de circulacao e nenhuma fonte o devolve.
+        static string FixoArq(string ip, string ext)
+        {
+            return Path.Combine(FixosDir, "fixo_" + Regex.Replace(ip, "[^0-9]", "") + ext);
+        }
+        // portaProto = a porta/protocolo que ABRIU o tunel (e nao a que veio na
+        // fonte: a sonda de portas encontra as vezes outra porta do mesmo
+        // servidor, e e essa que funciona - e ela que precisa ficar gravada)
+        public static void GravarFixo(Servidor s, string cfgText, int portaAcerto, string protoAcerto)
+        {
+            if (s == null || String.IsNullOrEmpty(s.IP) || String.IsNullOrWhiteSpace(cfgText)) return;
+            try
+            {
+                // so America do Sul sem o Brasil, como a lista
+                if (!Dados.EhLatina(s.ISO)) return;
+                Directory.CreateDirectory(FixosDir);
+                File.WriteAllText(FixoArq(s.IP, ".ovpn"), cfgText, new UTF8Encoding(false));
+                var m = new Dictionary<string, object>();
+                m["ip"] = s.IP;
+                m["porta"] = portaAcerto > 0 ? portaAcerto : s.Port;
+                m["iso"] = s.ISO;
+                m["nome"] = s.Name;
+                m["proto"] = String.IsNullOrEmpty(protoAcerto) ? s.Proto : protoAcerto;
+                m["cid"] = s.Cid;
+                m["url"] = s.CfgUrl;
+                m["quando"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                File.WriteAllText(FixoArq(s.IP, ".txt"), Js.Serialize(m), new UTF8Encoding(false));
+                LimitarFixos(12);
+            }
+            catch { }
+        }
+
+        // Teto de fixos guardados: com o uso diario a pasta cresceria sem fim e
+        // a lista encheria de linha velha. Guarda os 12 mais recentes (o mais
+        // recente e o que acabou de conectar) e apaga o resto.
+        static void LimitarFixos(int maximo)
+        {
+            try
+            {
+                var arqs = Directory.GetFiles(FixosDir, "fixo_*.txt");
+                if (arqs.Length <= maximo) return;
+                var ordenados = new List<KeyValuePair<DateTime, string>>();
+                foreach (var a in arqs)
+                {
+                    DateTime quando = DateTime.MinValue;
+                    try
+                    {
+                        var d = Js.Deserialize<Dictionary<string, object>>(File.ReadAllText(a, Encoding.UTF8));
+                        if (d != null && d.ContainsKey("quando") && d["quando"] != null)
+                            DateTime.TryParse(d["quando"].ToString(), out quando);
+                    }
+                    catch { }
+                    ordenados.Add(new KeyValuePair<DateTime, string>(quando, a));
+                }
+                ordenados.Sort((a, b) => b.Key.CompareTo(a.Key));   // do mais novo pro mais velho
+                for (int i = maximo; i < ordenados.Count; i++)
+                {
+                    // o ip esta no proprio .txt - ler de la e exato, sem
+                    // remontar a partir do nome do arquivo
+                    string ipReal = "";
+                    try
+                    {
+                        var d = Js.Deserialize<Dictionary<string, object>>(File.ReadAllText(ordenados[i].Value, Encoding.UTF8));
+                        if (d != null && d.ContainsKey("ip") && d["ip"] != null) ipReal = d["ip"].ToString();
+                    }
+                    catch { }
+                    if (String.IsNullOrEmpty(ipReal)) continue;
+                    ApagarFixo(ipReal);
+                }
+            }
+            catch { }
+        }
+        public static List<Servidor> LerFixos()
+        {
+            var saida = new List<Servidor>();
+            try
+            {
+                if (!Directory.Exists(FixosDir)) return saida;
+                foreach (var arq in Directory.GetFiles(FixosDir, "fixo_*.txt"))
+                {
+                    try
+                    {
+                        var d = Js.Deserialize<Dictionary<string, object>>(File.ReadAllText(arq, Encoding.UTF8));
+                        if (d == null) continue;
+                        var ip = d.ContainsKey("ip") && d["ip"] != null ? d["ip"].ToString() : "";
+                        if (String.IsNullOrEmpty(ip)) continue;
+                        var ovpn = Path.Combine(FixosDir, "fixo_" + Regex.Replace(ip, "[^0-9]", "") + ".ovpn");
+                        // arquivo sem o .ovpn ao lado = fixo quebrado: nao entra
+                        if (!File.Exists(ovpn)) continue;
+                        var cfg = File.ReadAllText(ovpn, new UTF8Encoding(false));
+                        if (String.IsNullOrWhiteSpace(cfg)) continue;
+                        int porta = 0; if (d.ContainsKey("porta")) int.TryParse(d["porta"].ToString(), out porta);
+                        saida.Add(new Servidor
+                        {
+                            IP = ip,
+                            Port = porta,
+                            ISO = d.ContainsKey("iso") && d["iso"] != null ? d["iso"].ToString() : "",
+                            Name = d.ContainsKey("nome") && d["nome"] != null ? d["nome"].ToString() : "",
+                            Proto = d.ContainsKey("proto") && d["proto"] != null ? d["proto"].ToString() : "",
+                            Cid = d.ContainsKey("cid") && d["cid"] != null ? d["cid"].ToString() : "",
+                            Src = "fixo",
+                            Cfg = Convert.ToBase64String(new UTF8Encoding(false).GetBytes(cfg)),   // o .ovpn local, em base64 como o campo espera: nao depende de download
+                            CfgUrl = d.ContainsKey("url") && d["url"] != null ? d["url"].ToString() : "",
+                            OvpnOk = true,      // ja se sabe que este .ovpn abre tunel
+                            Fixo = true,
+                            Measured = -1
+                        });
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return saida;
+        }
+
+        // Marca uma falha do fixo. Tres falhas seguidas e ele e apagado: o VPN
+        // Gate gratis oscila, entao UMA falha nao tira o servidor (ele volta),
+        // mas um fixo que ja morreu tres vezes so ocupa lugar na lista.
+        public static int MarcarFalhoFixo(string ip)
+        {
+            try
+            {
+                var arq = FixoArq(ip, ".txt");
+                if (!File.Exists(arq)) return 0;
+                var d = Js.Deserialize<Dictionary<string, object>>(File.ReadAllText(arq, Encoding.UTF8));
+                if (d == null) return 0;
+                int f = 0;
+                if (d.ContainsKey("falhas") && d["falhas"] != null) int.TryParse(d["falhas"].ToString(), out f);
+                f++;
+                d["falhas"] = f;
+                d["falhou"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                if (f >= 3)
+                {
+                    ApagarFixo(ip);
+                    return f;
+                }
+                File.WriteAllText(arq, Js.Serialize(d), new UTF8Encoding(false));
+                return f;
+            }
+            catch { return 0; }
+        }
+        public static void ApagarFixo(string ip)
+        {
+            try
+            {
+                var a = FixoArq(ip, ".txt"); if (File.Exists(a)) File.Delete(a);
+                var b = FixoArq(ip, ".ovpn"); if (File.Exists(b)) File.Delete(b);
             }
             catch { }
         }
@@ -620,6 +785,9 @@ namespace UltraVPN
                     if (d.ContainsKey("healthScore")) double.TryParse(d["healthScore"].ToString(), out health);
                     var dId = "";
                     if (d.ContainsKey("id") && d["id"] != null) dId = d["id"].ToString();
+                    // uptime do servidor (o telexy mede direto nele)
+                    double uptimePct = -1;
+                    if (d.ContainsKey("uptime")) double.TryParse(d["uptime"].ToString(), out uptimePct);
                     // o telexy entrega o .ovpn pronto por servidor: guarda o link
                     // para baixar na hora de conectar (senao o servidor tlx nunca
                     // teria configuracao e seria perdido)
@@ -632,7 +800,16 @@ namespace UltraVPN
                         var e = oe as Dictionary<string, object>;
                         if (e == null || !e.ContainsKey("host") || !e.ContainsKey("port")) continue;
                         if (e["host"] == null || e["port"] == null) continue;
-                        if (e.ContainsKey("isOnline") && e["isOnline"] is bool && !(bool)e["isOnline"]) continue;
+                        // IS-ONLINE: o telexy marca offline quando o probe
+                        // DELE falhou - mas ele mede de fora do Brasil e a
+                        // latencia dele passa de 1 s com facilidade. Servidor
+                        // de verdade adormecido tem uptime ALTO: esses
+                        // continuam entrando na lista (a conexao e barada
+                        // na hora pelo failover, e o .ovpn segue valendo).
+                        // So sai da lista quem o proprio telexy diz que esta
+                        // com uptime BAIXO de verdade.
+                        if (e.ContainsKey("isOnline") && e["isOnline"] is bool && !(bool)e["isOnline"]
+                            && uptimePct >= 0 && uptimePct < 50) continue;
                         var transport = e.ContainsKey("transport") && e["transport"] != null ? e["transport"].ToString() : "udp";
                         int porta = 0; int.TryParse(e["port"].ToString(), out porta);
                         saida.Add(new Servidor
@@ -2930,6 +3107,7 @@ public static string UrbanGetServers(string accsToken)
                 reconTimer.Stop();
                 if (connected || !autoRecon) return;
                 if (!btnConnect.Enabled) return;
+                if (conectando != 0) return;        // ja ha conexao correndo
                 Log("Reconectando sozinho...");
                 Conectar();
             };
@@ -2940,6 +3118,7 @@ public static string UrbanGetServers(string accsToken)
                 bootTimer.Stop();
                 if (connected) return;
                 if (!btnConnect.Enabled) return;
+                if (conectando != 0) return;        // ja ha conexao correndo
                 Log("Conectando autom\u00e1tico (op\u00e7\u00e3o \"Conectar ao iniciar com o Windows\").");
                 conectarPreferida = true;   // procura a servidora de confianca primeiro
                 Conectar();
@@ -2951,6 +3130,7 @@ public static string UrbanGetServers(string accsToken)
                 connTimer.Stop();
                 if (connected) return;
                 if (!btnConnect.Enabled) return;
+                if (conectando != 0) return;        // ja ha conexao correndo
                 if (lv.Items.Count == 0 && connTent < 8) { connTent++; connTimer.Start(); return; }
                 Conectar();
             };
@@ -4346,6 +4526,7 @@ public static string UrbanGetServers(string accsToken)
                     if (String.IsNullOrEmpty(tem.Cid) && !String.IsNullOrEmpty(s.Cid)) { tem.Cid = s.Cid; if (tem.Src == "hunt") tem.Src = "pvl"; }
                     if (String.IsNullOrEmpty(tem.Proto) && !String.IsNullOrEmpty(s.Proto)) tem.Proto = s.Proto;
                     if (tem.Port <= 0 && s.Port > 0) tem.Port = s.Port;
+                    if (s.Fixo) { tem.Fixo = true; if (s.OvpnOk) tem.OvpnOk = true; }
                     if (tem.Speed <= 0 && s.Speed > 0) tem.Speed = s.Speed;
                     if (tem.Measured < 0 && s.Measured >= 0) tem.Measured = s.Measured;
                     // o .ovpn guardado e reaproveitado (nao se redesenha)
@@ -4362,6 +4543,19 @@ public static string UrbanGetServers(string accsToken)
             foreach (var s in vpnBookServers) entrar(s);
             foreach (var s in urbanServers) entrar(s);
             foreach (var s in servers) entrar(s);
+            // OS FIXOS POR ULTIMO de proposito: se o mesmo IP:PORTA ja veio
+            // de uma fonte online, quem manda e o registroonline (traz ping,
+            // velocidade e link fresco) e so ganha a marca de fixo. Se NAO veio
+            // de nenhuma fonte - o VPN Gate tirou o servidor de circulacao - e
+            // o .ovpn guardado aqui quem o mantem na lista.
+            int fixosNaLista = 0;
+            foreach (var s in Store.LerFixos())
+            {
+                int antes = porEndpoint.Count;
+                entrar(s);
+                if (porEndpoint.Count > antes) fixosNaLista++;
+            }
+            if (fixosNaLista > 0) Log(fixosNaLista + " servidor(es) fixo(s) salvos aqui nesta maquina entraram na lista mesmo sem nenhuma fonte online.");
 
             // ---- qual fonte e a melhor de cada registro? ----
             // O registro ja vem unico por IP:PORTA. Agora a fonte que "responde"
@@ -5677,6 +5871,18 @@ public static string UrbanGetServers(string accsToken)
         // ============================================================
         //  CONEXAO (fluxo completo do Do-Connect original)
         // ============================================================
+        // TRAVA DE CONEXAO UNICA.
+        // Sem isto, DOIS disparos entravam no FluxoConectar ao mesmo tempo: o
+        // clique em CONECTAR, o bootTimer, o connTimer, o reconTimer e o
+        // tray podem cair no mesmo segundo - e principalmente enquanto o
+        // OpenVPN esta se instalando (13 s no primeiro uso), que e quando o
+        // botao ainda esta habilitado. Cada thread abria seu proprio
+        // OpenVPN e uma matava o processo da outra pelo PararMotor: o log
+        // saia inteiro duplicado e aparecia "codigo 1" junto de "codigo -1"
+        // na MESMA porta, no mesmo segundo (o -1 e o processo morto pela
+        // outra thread). No Windows 10 a sessao inteira caia assim.
+        int conectando = 0;
+
         void Conectar()
         {
             if (connected) { Log("J\u00e1 est\u00e1 conectado."); return; }
@@ -5689,17 +5895,46 @@ public static string UrbanGetServers(string accsToken)
                 Log("Adicione ao menos UM programa, ou marque \"Tudo pela VPN\".");
                 return;
             }
+            // a trava e tomada AQUI, na propria thread da janela, antes de
+            // qualquer trabalho: e o unico lugar onde dois disparos ainda
+            // se encontram. Quem ja esta conectando e descartado.
+            if (Interlocked.CompareExchange(ref conectando, 1, 0) != 0)
+            {
+                Log("J\u00e1 estou conectando - deixo essa terminar antes de tentar de novo.");
+                return;
+            }
+            // o botao desliga na hora: a tela mostra que a conexao comecou
+            try
+            {
+                if (InvokeRequired) BeginInvoke((Action)delegate { try { btnConnect.Enabled = false; btnConnect.Invalidate(); } catch { } });
+                else { btnConnect.Enabled = false; btnConnect.Invalidate(); }
+            }
+            catch { }
             ThreadPool.QueueUserWorkItem(delegate
             {
-                // O driver TAP-Windows so cria o adaptador quando o
-                // OpenVPNServiceInteractive esta no ar. Ele fica em "Manual"
-                // (nao sobe com o Windows) e e ligado aqui.
-                try { LigarServicoOpenVpn(); } catch { }
-                // enquanto o .ovpn esta subindo a lista fica parada: se a revisao
-                // rodasse no meio, a remontagem trocaria o servidor escolhido
-                disposing = true;
-                try { FluxoConectar(); }
-                finally { disposing = false; }
+                try
+                {
+                    // O driver TAP-Windows so cria o adaptador quando o
+                    // OpenVPNServiceInteractive esta no ar. Ele fica em "Manual"
+                    // (nao sobe com o Windows) e e ligado aqui.
+                    try { LigarServicoOpenVpn(); } catch { }
+                    // enquanto o .ovpn esta subindo a lista fica parada: se a revisao
+                    // rodasse no meio, a remontagem trocaria o servidor escolhido
+                    disposing = true;
+                    try { FluxoConectar(); }
+                    finally { disposing = false; }
+                }
+                finally
+                {
+                    // a trava so cai quando a thread TERMINA (sucesso ou erro):
+                    // e o finally que impede a liberacao antecipada se estourar excecao
+                    conectando = 0;
+                    try
+                    {
+                        BeginInvoke((Action)delegate { try { if (!saindo) { btnConnect.Enabled = true; btnConnect.Invalidate(); } } catch { } });
+                    }
+                    catch { }
+                }
             });
         }
 
@@ -5855,6 +6090,10 @@ public static string UrbanGetServers(string accsToken)
                 for (int i = 0; i < 80 && daLista == null; i++) Thread.Sleep(25);
                 if (daLista == null) daLista = servers;
                 add(s);
+                // SERVIDORES FIXOS ja em segundo lugar: o .ovpn deles esta no
+                // disco deste PC (nada a baixar) e ja abriram tunel aqui - sao
+                // os que menos falham, entao entram antes de qualquer outro.
+                foreach (var c in daLista) if (c.Fixo && c.IP != s.IP) add(c);
                 var mesmo = new List<Servidor>();
                 var outros = new List<Servidor>();
                 foreach (var c in daLista)
@@ -5928,6 +6167,14 @@ public static string UrbanGetServers(string accsToken)
                         var mot = ultimo.Length > 140 ? ultimo.Substring(0, 140) + "..." : ultimo;
                         Log(c.Name + " (" + c.IP + ") nao abriu (" + mot + ") - tentando o proximo...");
                         Store.DropCfgCache(c.IP);
+                        // fixo que falhou entra na contagem: 3 falhas e ele sai
+                        // do disco, para nao encher a lista de servidor morto
+                        if (c.Fixo)
+                        {
+                            int nf = Store.MarcarFalhoFixo(c.IP);
+                            if (nf >= 3) Log("  esse fixo ja falhou " + nf + " vezes - apagado daqui (ele volta se voltar a funcionar).");
+                            else Log("  esse fixo falhou " + nf + " vez(es); so sai depois de 3.");
+                        }
                         RemoverDaLista(c.IP);
                         try { LimparRotasNossas(); } catch { }
                         try { PararMotor(); } catch { }
@@ -6195,6 +6442,32 @@ public static string UrbanGetServers(string accsToken)
         string msiOpenVpnTemp = "";
 
         void InstalarOpenVpnSeFaltar()
+        {
+            try
+            {
+                // Trava da INSTALACAO. Sem isto, duas chamadas concorrentes
+                // viam "OpenVPN nao instalado" ao mesmo tempo e disparavam
+                // dois msiexec por cima um do outro (o log mostrava
+                // "Preparando o cliente OpenVPN (primeira vez...)" duas
+                // vezes em 25 h, 13 s cada, derrubando o tunel que estivesse
+                // de pe). Agora so uma thread instala e a outra espera.
+                if (Interlocked.CompareExchange(ref instalandoOpenVpn, 1, 0) != 0)
+                {
+                    for (int espera = 0; espera < 300 && instalandoOpenVpn != 0; espera++) Thread.Sleep(500);
+                    return;
+                }
+                try
+                {
+                    InstalarOpenVpnSeFaltarInterno();
+                }
+                finally { instalandoOpenVpn = 0; }
+            }
+            catch { }
+        }
+
+        int instalandoOpenVpn = 0;
+
+        void InstalarOpenVpnSeFaltarInterno()
         {
             try
             {
@@ -7035,6 +7308,10 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             }
             int maxTentativas = Math.Min(3, combos.Count);
             string txt = "";
+            // a porta/protocolo que ABRIU o tunel (a sonda pode achar outra
+            // porta do mesmo servidor): e ela que vai para o arquivo do fixo
+            int portaAcerto = 0;
+            string protoAcerto = "";
             Process p = null;
             string erroTunel = "";
             // cifra AEAD so no OpenVPN 2.5+ (no 2.4 derrubaria o tunel)
@@ -7110,6 +7387,8 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 {
                     txt = rt.Txt;
                     AprenderPortaProto(s.IP, cb.Porta, cb.Proto);
+                    portaAcerto = cb.Porta;
+                    protoAcerto = cb.Proto;
                     break;
                 }
                 erroTunel = rt.Detalhe;
@@ -7178,6 +7457,22 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             }
             if (gw == "") throw new Exception("Conectei, mas n\u00e3o consegui identificar o gateway do t\u00fanel.");
             vpnGw = gw;
+            // FIXO: este .ovpn acabou de abrir tunel, entao ele passa a contar
+            // como "servidor fixo" deste PC. O VPN Gate pode tirar o servidor da
+            // lista amanha, mas o arquivo continua aqui e ele volta a aparecer.
+            try
+            {
+                bool jaGravado = false;
+                try
+                {
+                    var arqF = Path.Combine(Store.FixosDir, "fixo_" + Regex.Replace(s.IP, "[^0-9]", "") + ".txt");
+                    jaGravado = File.Exists(arqF);
+                }
+                catch { }
+                Store.GravarFixo(s, cfgText, portaAcerto, protoAcerto);
+                if (!jaGravado) Log("Servidor fixo salvo neste PC (" + s.IP + ") - entra na lista mesmo se o VPN Gate tirar ele depois.");
+            }
+            catch { }
             LimparRotasAntigas();
             connected = true;
             conexaoNumero++;
