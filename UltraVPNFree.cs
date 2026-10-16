@@ -601,6 +601,29 @@ namespace UltraVPN
             }
             catch { }
         }
+        // CURA: a porta guardada morreu, mas o MESMO ip respondeu em outra.
+        // Reescreve so a porta/protocolo - o .ovpn continua o mesmo (ele tem
+        // certificado do servidor, e o remote e reescrito na hora de abrir o
+        // tunel). Zera a contagem de falhas junto: quem volta a responder
+        // volta a valer.
+        public static bool RegravarPortaFixo(string ip, int porta, string proto)
+        {
+            try
+            {
+                var arq = FixoArq(ip, ".txt");
+                if (!File.Exists(arq)) return false;
+                var d = Js.Deserialize<Dictionary<string, object>>(File.ReadAllText(arq, Encoding.UTF8));
+                if (d == null) return false;
+                d["porta"] = porta;
+                d["proto"] = proto;
+                d["curado"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                d.Remove("falhas");
+                d.Remove("falhou");
+                File.WriteAllText(arq, Js.Serialize(d), new UTF8Encoding(false));
+                return true;
+            }
+            catch { return false; }
+        }
 
         // ---------------- portas aprendidas (portas.json) ----------------
         public class PortasMap
@@ -1336,7 +1359,7 @@ public static string UrbanGetServers(string accsToken)
         // ---------------- medida rapida (TCP + UDP hard-reset) ----------------
         // A MESMA sonda da saude: TCP = aperto de mao cronometrado; UDP = os
         // 4 hard-reset do OpenVPN (so servidor vivo responde). 1,4 s no total.
-        public class SondaRtt { public string Kind; public string Ip; public Socket Sock; public TcpClient Cli; public Task T; public Stopwatch Sw; public bool Done; public int Ms = -1; }
+        public class SondaRtt { public string Kind; public string Ip; public Socket Sock; public TcpClient Cli; public Task T; public Stopwatch Sw; public bool Done; public int Ms = -1; public int Porta; }
 
         public static byte[] HardResetVars(Random rnd)
         {
@@ -1438,6 +1461,93 @@ public static string UrbanGetServers(string accsToken)
                 if (p.Ms >= 0) res[p.Ip] = p.Ms;
             }
             return res;
+        }
+
+        // Sonda VARIAS portas do MESMO ip e devolve a primeira que respondeu
+        // (TCP por connect, UDP pelo pacote de sondagem do SoftEther, igual ao
+        // MedirRtts). Serve para CURAR um fixo: a porta guardada pode ter
+        // morrido - o VPN Gate troca de porta o tempo todo - enquanto o
+        // servidor continua de pe em outra.
+        // Devolve (porta, protocolo) da primeira que respondeu, ou (0, "").
+        public static KeyValuePair<int, string> SondarAlternativas(string ip, List<KeyValuePair<int, string>> tentativas)
+        {
+            var nenhuma = new KeyValuePair<int, string>(0, "");
+            if (String.IsNullOrEmpty(ip) || tentativas == null || tentativas.Count == 0) return nenhuma;
+            var probes = new List<SondaRtt>();
+            var rnd = new Random();
+            foreach (var t in tentativas)
+            {
+                if (t.Key <= 0 || t.Key > 65535) continue;
+                try
+                {
+                    if (String.Equals(t.Value, "tcp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var cli = new TcpClient();
+                        var tsk = cli.ConnectAsync(ip, t.Key);
+                        probes.Add(new SondaRtt { Kind = "tcp", Ip = ip, Porta = t.Key, Cli = cli, T = tsk, Sw = Stopwatch.StartNew() });
+                    }
+                    else
+                    {
+                        var sk = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                        sk.Connect(ip, t.Key);
+                        var sid = new byte[8];
+                        rnd.NextBytes(sid);
+                        var pidb = new byte[] { 0, 0, 0, 0 };
+                        byte[][] vars = new byte[][] {
+                            concat(new byte[][]{ new byte[]{0x38}, sid, pidb, new byte[]{0} }),
+                            concat(new byte[][]{ new byte[]{0x38}, sid, pidb, new byte[]{0,0,0,0} }),
+                            concat(new byte[][]{ new byte[]{0x38}, sid, pidb }),
+                            concat(new byte[][]{ new byte[]{0x08}, sid, pidb, new byte[]{0} }) };
+                        foreach (var v in vars) { try { sk.Send(v, 0, v.Length, SocketFlags.None); } catch { } }
+                        probes.Add(new SondaRtt { Kind = "udp", Ip = ip, Porta = t.Key, Sock = sk, Sw = Stopwatch.StartNew() });
+                    }
+                }
+                catch { }
+            }
+            var lim = Stopwatch.StartNew();
+            while (lim.ElapsedMilliseconds < 1700)
+            {
+                int abertos = 0;
+                foreach (var p in probes)
+                {
+                    if (p.Done) continue;
+                    try
+                    {
+                        if (p.Kind == "udp")
+                        {
+                            if (p.Sock.Poll(0, SelectMode.SelectRead))
+                            {
+                                var buf = new byte[2048];
+                                if (p.Sock.Receive(buf) > 0) p.Ms = (int)p.Sw.ElapsedMilliseconds;
+                                p.Done = true;
+                            }
+                            else abertos++;
+                        }
+                        else
+                        {
+                            if (p.T.IsCompleted)
+                            {
+                                if (p.Cli.Connected) p.Ms = (int)p.Sw.ElapsedMilliseconds;
+                                p.Done = true;
+                            }
+                            else abertos++;
+                        }
+                    }
+                    catch { p.Done = true; }
+                }
+                if (abertos == 0) break;
+                Thread.Sleep(15);
+            }
+            var resp = nenhuma;
+            foreach (var p in probes)
+            {
+                try { if (p.Sock != null) p.Sock.Close(); } catch { }
+                try { if (p.Cli != null) p.Cli.Close(); } catch { }
+                // a PRIMEIRA da lista que respondeu vence: a lista ja vem em
+                // ordem de preferencia (porta aprendida, porta da fonte...)
+                if (resp.Key == 0 && p.Ms >= 0) resp = new KeyValuePair<int, string>(p.Porta, p.Kind);
+            }
+            return resp;
         }
 
         // ---------------- sonda em POOL (vigia do tunel) ----------------
@@ -6134,7 +6244,24 @@ public static string UrbanGetServers(string accsToken)
                         int m0;
                         if (escolhaManual && rtts.TryGetValue(s.IP, out m0) && m0 < 0)
                             Log("O escolhido (" + s.Name + ") n\u00e3o respondeu agora - abro o pr\u00f3ximo vivo direto.");
+                        // FIXOS CAIDOS: a sonda nao respondeu para alguns fixos.
+                        // Eles seriam so descartados - e, como o descarte acontece
+                        // ANTES de qualquer tentativa, a contagem de falhas deles
+                        // nunca rodava e o fixo morto ficava na lista para
+                        // sempre. Aqui cada um e CURADO antes de virar lembranca:
+                        // procura-se o mesmo ip em outras portas conhecidas, e o
+                        // que achar volta para a fila de candidatos.
+                        // so faz isso quando a internet esta de pe (algum
+                        // candidato passou na sonda): se NINGUEM passou, e queda
+                        // de rede, nao servidor, e nada e descartado.
+                        var caidos = new List<Servidor>();
+                        foreach (var c in cand) if (c.Fixo && !vivos.Contains(c)) caidos.Add(c);
                         cand = vivos;
+                        foreach (var c in caidos)
+                        {
+                            try { if (CurarFixo(c)) cand.Insert(0, c); }
+                            catch { }
+                        }
                     }
                     else { rtts = new Dictionary<string, int>(); cand.Insert(0, s); }
                 }
@@ -6303,6 +6430,76 @@ public static string UrbanGetServers(string accsToken)
                 Log("  " + ip + " falhou agora - continua na lista (vale tentar de novo depois).");
             }
             catch { }
+        }
+
+        // CURA DE FIXO.
+        // A sonda de porta tirou um fixo da lista porque o IP:porta guardado
+        // nao respondeu - mas o SERVIDOR pode continuar de pe em OUTRA porta
+        // (o VPN Gate troca de porta o tempo todo; porta e protocolo mudam
+        // sem o IP mudar). Antes de desistir do fixo, o programa procura o
+        // MESMO ip em todas as portas que ele ja conhece e reescreve o fixo
+        // com a primeira que responder. O fixo so e apagado quando NENHUMA
+        // porta do ip responde - e ainda assim so depois de 3 vezes.
+        // Devolve true quando o fixo foi curado (ele volta a ser candidato).
+        bool CurarFixo(Servidor c)
+        {
+            try
+            {
+                if (c == null || String.IsNullOrEmpty(c.IP)) return false;
+                var tent = new List<KeyValuePair<int, string>>();
+                Action<int, string> por = delegate(int p, string pr)
+                {
+                    if (p <= 0 || p > 65535) return;
+                    if (pr != "tcp" && pr != "udp") pr = "udp";
+                    foreach (var t in tent) if (t.Key == p && t.Value == pr) return;
+                    if (tent.Count >= 20) return;
+                    tent.Add(new KeyValuePair<int, string>(p, pr));
+                };
+                // a) as outras linhas conhecidas do MESMO ip (mesmo host, outra
+                //    porta) - a fonte mais confiavel, porque veio de quem mediu
+                foreach (var o in servers)
+                    if (o != null && o.IP == c.IP && o.Port != c.Port) { por(o.Port, o.Proto); por(o.Port, o.Proto == "tcp" ? "udp" : "tcp"); }
+                // b) a porta vencedora aprendida deste ip
+                try
+                {
+                    string ganha;
+                    if (portaProtoPorIP.TryGetValue(c.IP, out ganha) && !String.IsNullOrEmpty(ganha))
+                    {
+                        var pp = ganha.Split('/');
+                        int pg = 0; if (pp.Length > 0) int.TryParse(pp[0], out pg);
+                        por(pg, pp.Length > 1 ? pp[1] : "udp");
+                    }
+                }
+                catch { }
+                // c) portas ja vistas neste ip
+                try
+                {
+                    List<int> vip;
+                    if (portasPorIP.TryGetValue(c.IP, out vip) && vip != null)
+                        foreach (var p in vip) { por(p, "udp"); por(p, "tcp"); }
+                }
+                catch { }
+                // d) as portas que o SoftEther mais usa, para quando o ip e o
+                //    mesmo e so a porta que mudou
+                foreach (var p in new int[] { 1194, 443, 992, 1195, 995, 1723, 1300, 1197 })
+                { por(p, "udp"); por(p, "tcp"); }
+
+                var achou = Rede.SondarAlternativas(c.IP, tent);
+                if (achou.Key > 0)
+                {
+                    c.Port = achou.Key;
+                    c.Proto = achou.Value;
+                    Store.RegravarPortaFixo(c.IP, achou.Key, achou.Value);
+                    Log("Fixo " + c.IP + ": a porta guardada nao respondeu, mas " + achou.Key + "/" + achou.Value.ToUpperInvariant() + " respondeu - corrigi o fixo.");
+                    return true;
+                }
+                // nenhuma porta do ip respondeu: agora sim e falha do servidor
+                int nf = Store.MarcarFalhoFixo(c.IP);
+                if (nf >= 3) Log("Fixo " + c.IP + ": nenhuma das " + tent.Count + " portas conhecidas respondeu, 3a vez seguida - apaguei o fixo.");
+                else Log("Fixo " + c.IP + ": nenhuma das " + tent.Count + " portas conhecidas respondeu (" + nf + " de 3). Ele continua na lista.");
+                return false;
+            }
+            catch { return false; }
         }
 
         // ============================================================
