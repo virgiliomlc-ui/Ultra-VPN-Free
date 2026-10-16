@@ -7916,13 +7916,24 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 {
                     var saida = p.StandardOutput.ReadToEnd();
                     p.WaitForExit(5000);
-                    bool naTabela = false;
                     foreach (var ln in saida.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
                     {
                         var t = ln.Trim();
-                        if (t.StartsWith("Network Destination")) { naTabela = true; continue; }
-                        if (t.StartsWith("Persistent Routes") || t.StartsWith("Default Route")) { naTabela = false; continue; }
-                        if (!naTabela) continue;
+                        if (t.Length == 0) continue;
+                        // NAO se procura o cabecalho em nenhum idioma: ele muda
+                        // ("Network Destination" no ingles, "Endereço de rede"
+                        // no portugues - e com a codificacao trocada o ã chega
+                        // ate mangled). Vale a LINHA: se comeca com IP + mascara
+                        // e rota, em qualquer idioma, em qualquer Windows. As
+                        // outras linhas (interfaces, titulos, "Nenhum"/"None")
+                        // nunca comecam com dois IPs e caem fora sozinhas.
+                        // Antes esta funcao so reconhecia o cabecalho em ingles:
+                        // no Windows brasileiro ela voltava VAZIA, a limpeza de
+                        // rotas zumbis nao achava nada, e cada conexao empilhava
+                        // rotas via um gateway morto novo. Com varias gateways
+                        // para o mesmo destino e a mesma metrica, o Windows
+                        // espalha os pacotes entre tunel vivo e morto: o ping
+                        // da voz sobe e desce sem parar. Foi exatamente isso.
                         var part = t.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                         IPAddress ip;
                         if (part.Length >= 5 && IPAddress.TryParse(part[0], out ip) && IPAddress.TryParse(part[1], out ip))
