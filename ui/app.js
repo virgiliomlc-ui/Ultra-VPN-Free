@@ -194,8 +194,7 @@ function aplicarServidores(d) {
   estado.ordemCresc = !!d.ordemCresc;
   marcarColunaOrdenada();
   var total = estado.servidores.length;
-  // nao escreve a linha direto: quem escreve e mostrarLinhaConta(), que
-  // mantem o "Conectado em ..." quando o tunel esta ligado
+  // nao escreve a linha direto: quem escreve e mostrarLinhaConta()
   mostrarLinhaConta();
 
   var velocidadeMax = 1;
@@ -376,30 +375,31 @@ function setConectado(conectado, servidor, endereco) {
   if (servidor) estado.servidorAtual = servidor;
   if (endereco) estado.servidorEndereco = endereco;
   var b = document.getElementById('conectar');
-  b.textContent = estado.conectado ? 'DESCONECTAR' : 'CONECTAR';
+  var txt = b.querySelector('.txt');
+  var info = document.getElementById('infoConectar');
+  if (txt) txt.textContent = estado.conectado ? 'DESCONECTAR' : 'CONECTAR';
   b.classList.toggle('conectado', estado.conectado);
+  // o nome do servidor com o IP e a porta vao DENTRO do botao, logo abaixo
+  // do "DESCONECTAR" - e nao na linha de cima, que e da contagem
+  if (info) {
+    if (estado.conectado && estado.servidorAtual) {
+      var t = estado.servidorAtual;
+      if (estado.servidorEndereco) t += '  ·  ' + estado.servidorEndereco;
+      info.textContent = t;
+    } else info.textContent = '';
+  }
   mostrarLinhaConta();
 }
 
-// a linha do "conectado em" e a mesma que mostra quantos servidores tem.
-// A lista chega a cada 8 s e escrevia por cima, apagando o nome do servidor
-// ligado - por isso quem escreve e sempre esta funcao, que sabe respeitar as
-// duas coisas.
+// a linha de cima mostra quantos servidores ha. Quem escreve nela e esta
+// funcao, para o botao e a lista nunca brigarem pelo mesmo lugar.
 function mostrarLinhaConta() {
   var linha = document.getElementById('conta');
   if (!linha) return;
-  if (estado.conectado && estado.servidorAtual) {
-    var txt = 'Conectado em ' + estado.servidorAtual;
-    if (estado.servidorEndereco) txt += '  (' + estado.servidorEndereco + ')';
-    linha.textContent = txt;
-    linha.classList.add('conectado');
-  } else {
-    linha.classList.remove('conectado');
-    var t = (estado.servidores || []).length;
-    linha.textContent = t ? (t + (t === 1 ? ' servidor na América do Sul | 1 mostrado'
-                                      : ' servidores na América do Sul | ' + t + ' mostrados'))
-                          : 'carregando servidores...';
-  }
+  var t = (estado.servidores || []).length;
+  linha.textContent = t ? (t + (t === 1 ? ' servidor na América do Sul | 1 mostrado'
+                                   : ' servidores na América do Sul | ' + t + ' mostrados'))
+                        : 'carregando servidores...';
 }
 
 /* ---------------- botoes ---------------- */

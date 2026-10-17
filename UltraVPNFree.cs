@@ -8827,17 +8827,19 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 {
                     var cidSrv = Dados.GetServerLocal(s);
                     if (!String.IsNullOrEmpty(cidSrv) && cidSrv != s.Name) servidorAtual = s.Name + " - " + cidSrv;
-                    if (usado != "padrao") servidorAtual += " (" + usado.ToUpperInvariant() + ")";
-                }
-                catch { }
-                // o endereco completo que o tunel esta usando, para a tela
-                // mostrar do lado do nome (o antigo mostrava so o nome)
-                try
-                {
-                    var protoMostra = usado;
-                    if (String.IsNullOrEmpty(protoMostra) || usado == "padrao")
-                        protoMostra = s.Proto == "udp" ? "UDP" : s.Proto == "tcp" ? "TCP" : "UDP/TCP";
-                    servidorEndereco = s.IP + ":" + s.Port + "/" + protoMostra.ToUpperInvariant();
+                    // o protocolo entra no nome, como o codigo antigo fazia.
+                    // "padrao" nao aparecia la; aqui ele entra tambem, senao
+                    // ficava "Chile" sem dizer se era UDP ou TCP.
+                    if (usado != "padrao")
+                        servidorAtual += " (" + usado.ToUpperInvariant() + ")";
+                    else
+                    {
+                        var protoMostra = s.Proto == "udp" ? "UDP" : s.Proto == "tcp" ? "TCP" : "UDP/TCP";
+                        servidorAtual += " (" + protoMostra + ")";
+                    }
+                    // o endereco: a tela mostra logo abaixo do nome, dentro
+                    // do botao DESCONECTAR
+                    servidorEndereco = s.IP + ":" + s.Port;
                 }
                 catch { }
                 AtualizarEstadoConexao();
