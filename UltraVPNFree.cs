@@ -919,6 +919,56 @@ namespace UltraVPN
         public static readonly string TempDir = Path.Combine(Path.GetTempPath(), "Ultra VPN Free");
         public static readonly string LogPath = Path.Combine(DirDados, "ultravpnfree.log");
         public static readonly string CachePath = Path.Combine(DirDados, "servers.cache");
+
+        // ---------------------------------------------------------------
+        //  SERVIDORES QUE JA DERAM CERTO
+        // ---------------------------------------------------------------
+        //  Servidor que ja deixou o usuario conectado fica na lista para
+        //  sempre, mesmo que a fonte pare de anunciar. O que falhou sai da
+        //  lista, mas volta sozinho na proxima atualizacao se a fonte
+        //  trouxer ele de novo. Uma linha por servidor:
+        //      ip;porta;proto;ISO;nome
+        //  IP e porta sao a identidade: se a fonte mudar a porta de um
+        //  servidor que funcionava, ele volta pelo caminho normal.
+        public static readonly string BonsPath = Path.Combine(DirDados, "servidores_bons.txt");
+
+        public static List<string> LerBons()
+        {
+            var outp = new List<string>();
+            try
+            {
+                if (!File.Exists(BonsPath)) return outp;
+                foreach (var l in File.ReadAllLines(BonsPath))
+                {
+                    if (String.IsNullOrWhiteSpace(l)) continue;
+                    if (!l.StartsWith("#")) outp.Add(l.Trim());
+                }
+            }
+            catch { }
+            return outp;
+        }
+
+        public static void GravarBons(List<string> linhas)
+        {
+            try
+            {
+                var todos = new List<string>();
+                todos.Add("# ip;porta;proto;ISO;nome - quem ja conectou de verdade");
+                var vistos = new HashSet<string>();
+                foreach (var l in linhas)
+                {
+                    if (String.IsNullOrWhiteSpace(l)) continue;
+                    var p = l.Split(';');
+                    if (p.Length < 2) continue;
+                    var k = p[0].Trim() + ":" + p[1].Trim();
+                    if (!vistos.Add(k)) continue;
+                    todos.Add(l);
+                }
+                while (todos.Count > 400) todos.RemoveAt(1);
+                File.WriteAllLines(BonsPath, todos.ToArray());
+            }
+            catch { }
+        }
         public static readonly string StatePath = Path.Combine(DirDados, "state.json");
         public static readonly string PvlCachePath = Path.Combine(DirDados, "pvl.cache");
         public static readonly string PortasPath = Path.Combine(DirDados, "portas.json");
@@ -5816,6 +5866,8 @@ Bitmap MontarFundoCover()
                 // IP que nao pode ser de uma maquina nunca entra na lista
                 if (!IpDeHost(s.IP)) { ipRuim++; continue; }
                 if (s.Port <= 0 && comPorta.Contains(s.IP)) continue;   // a de porta manda
+                // quem ja deu certo NUNCA e filtered por falta de sonda: a
+                // fonte pode deixar de anunciar, mas ele continua valendo
                 if (s.Port <= 0 && s.Src == "hunt")
                 {
                     // hunt sem porta nenhuma: monta pela semente para poder existir
@@ -5835,6 +5887,10 @@ Bitmap MontarFundoCover()
                 limpos.Add(s);
             }
             nova = limpos;
+            // quem ja deixou o usuario conectado volta, mesmo se a fonte
+            // parou de anunciar (e o que falhou volta tambem, se a fonte
+            // trouxer de novo - ai entra pelo caminho normal, acima)
+            TrazerBonsDeVolta(nova);
             servers = nova;
             if (ipRuim > 0)
                 Log(ipRuim + " servidores fora da lista por trazerem IP invalido (a fonte mandou numero quebrado).");
@@ -6972,6 +7028,65 @@ Bitmap MontarFundoCover()
             return true;
         }
 
+        // ---------------- os que ja deram certo ----------------
+        // Guardado em arquivo para atravessar as fechadas do programa: o que
+        // ja deixou o usuario conectado nao some da lista nunca mais.
+        void MarcarBom(Servidor s)
+        {
+            try
+            {
+                if (s == null || String.IsNullOrEmpty(s.IP)) return;
+                var linhas = Store.LerBons();
+                string chave = s.IP + ";" + s.Port + ";" + (String.IsNullOrEmpty(s.Proto) ? "" : s.Proto)
+                             + ";" + (s.ISO ?? "") + ";" + (s.Name ?? "");
+                foreach (var l in linhas)
+                {
+                    var p = l.Split(';');
+                    if (p.Length >= 2 && p[0].Trim() == s.IP && p[1].Trim() == s.Port.ToString()) return;
+                }
+                linhas.Add(chave);
+                Store.GravarBons(linhas);
+                Log("  " + Dados.GetServerLocal(s) + " entrou na lista dos que ja deram certo.");
+            }
+            catch { }
+        }
+
+        // quem ja deu certo e a fonte parou de anunciar volta para a lista
+        void TrazerBonsDeVolta(List<Servidor> lista)
+        {
+            try
+            {
+                foreach (var l in Store.LerBons())
+                {
+                    var p = l.Split(';');
+                    if (p.Length < 4) continue;
+                    string ip = p[0].Trim(), proto = p[2].Trim(), iso = p[3].Trim();
+                    int porta = 0;
+                    Int32.TryParse(p[1].Trim(), out porta);
+                    if (String.IsNullOrEmpty(ip) || porta <= 0) continue;
+                    if (String.IsNullOrEmpty(proto)) continue;
+                    if (!Dados.EhLatina(iso)) continue;
+                    if (!IpDeHost(ip)) continue;
+                    bool jaTem = false;
+                    foreach (var s in lista)
+                        if (s != null && s.IP == ip) { jaTem = true; break; }
+                    if (jaTem) continue;
+                    lista.Add(new Servidor
+                    {
+                        IP = ip,
+                        Port = porta,
+                        Proto = proto,
+                        ISO = iso,
+                        Name = (p.Length > 4 && !String.IsNullOrEmpty(p[4])) ? p[4] : Dados.GetCountryName(iso),
+                        Src = "guardado",
+                        Measured = -1
+                    });
+                    Log("  " + ip + ":" + porta + " voltou para a lista (ja tinha conectado).");
+                }
+            }
+            catch { }
+        }
+
         bool TemPaisNaLista(string iso)
         {
             try
@@ -7813,16 +7928,36 @@ Bitmap MontarFundoCover()
             });
         }
 
-        // Servidor que falhou UMA conexao NAO e mais jogado fora da lista. Ele fica
-        // la para a proxima tentativa e para as varreduras seguintes: servidor
-        // gratis oscila o tempo todo e sumir com ele na primeira falha deixava
-        // a lista vazia sem que o usuario pudesse escolher outro. O que o
-        // programa faz agora e AVISAR e seguir para o proximo servidor.
+        // Servidor que falhou SAI da lista - mas volta sozinho na proxima
+        // atualizacao se a fonte trouxer ele de novo, e nunca e removido
+        // de vez se ele ja deixou o usuario conectado alguma vez.
         void RemoverDaLista(string ip)
         {
             try
             {
-                Log("  " + ip + " falhou agora - continua na lista (vale tentar de novo depois).");
+                bool jaFuncionou = false;
+                foreach (var l in Store.LerBons())
+                {
+                    var p = l.Split(';');
+                    if (p.Length >= 2 && p[0].Trim() == ip) { jaFuncionou = true; break; }
+                }
+                if (jaFuncionou)
+                {
+                    Log("  " + ip + " falhou agora, mas ja tinha conectado antes - continua na lista.");
+                    return;
+                }
+                var fora = new List<Servidor>();
+                foreach (var s in servers)
+                {
+                    if (s != null && s.IP == ip) { fora.Add(s); continue; }
+                    if (s != null) fora.Add(s);
+                }
+                if (fora.Count != servers.Count)
+                {
+                    servers = fora;
+                    try { AtualizarLista(); } catch { }
+                }
+                Log("  " + ip + " falhou - saiu da lista (se a fonte trouxer de novo, volta).");
             }
             catch { }
         }
@@ -8976,6 +9111,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             LimparRotasAntigas();
             connected = true;
             conexaoNumero++;
+            // este servidor deu CERTO: entra na memoria dos que ficam na
+            // lista para sempre, mesmo que a fonte pare de anunciar
+            try { MarcarBom(s); } catch { }
             ownedRoutes = new List<string>();
             defRoute = false;
             BeginInvoke((Action)delegate
