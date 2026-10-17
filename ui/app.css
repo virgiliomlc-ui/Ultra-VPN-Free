@@ -175,10 +175,13 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 }
 #btnDesinst:hover { background:rgba(255,183,3,.16); border-color:#ffb703; }
 
-/* ---------- log ---------- */
+/* ---------- log ----------
+   No mockup a caixa media 74 px e as 8 linhas apareciam POR CIMA dela (nao
+   havia corte). Aqui o conteudo rola dentro da caixa, entao a altura e a
+   das 7 linhas que cabem na janela - 118 px = 7 linhas de 17. */
 #rotLog { padding:8px 18px 2px; color:#bcd8de; flex:0 0 auto; }
 #log {
-  margin:2px 18px 12px; padding:8px; flex:0 0 74px;
+  margin:2px 18px 12px; padding:8px; flex:0 0 118px;
   background:rgba(2,10,13,.55); border:1px solid rgba(0,216,222,.22);
   border-radius:2px; color:#cfe6ec; font-size:12px; line-height:1.42;
   font-family:Consolas,"Courier New",monospace;

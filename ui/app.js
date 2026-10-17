@@ -115,13 +115,18 @@ function aplicarPaises(lista) {
   var s = document.getElementById('pais');
   var atual = s.value;
   s.innerHTML = '';
+  // a primeira opcao e a regiao inteira: e o que o programa antigo mostra
+  var t = document.createElement('option');
+  t.value = '';
+  t.textContent = 'Todos os países da América do Sul';
+  s.appendChild(t);
   for (var i = 0; i < estado.pais.length; i++) {
     var o = document.createElement('option');
     o.value = estado.pais[i].iso;
     o.textContent = estado.pais[i].nome;
     s.appendChild(o);
   }
-  if (atual) s.value = atual;
+  s.value = atual;
 }
 
 function aplicarEstado(d) {
@@ -227,7 +232,7 @@ function aplicarProgramas(d) {
   for (var i = 0; i < estado.programas.length; i++) {
     var p = estado.programas[i];
     h += '<div class="prog' + (i === progSel ? ' sel' : '') + '" data-i="' + i + '">' +
-         (p.icone ? '<img src="' + p.icone + '">' : '') +
+         '<img alt="">' +
          '<span>' + esc(p.nome) + '</span></div>';
   }
   document.getElementById('listaProg').innerHTML = h;
@@ -242,6 +247,17 @@ function aplicarProgramas(d) {
         manda('escolherPrograma', { indice: idx });
       });
     })(parseInt(itens[k].getAttribute('data-i'), 10), itens[k]);
+  }
+  // o icone do lado do nome e o ET que pisca (o mesmo da barra vertical),
+  // com fundo preto - como no desenho. O mesmo quadro vai para as duas
+  // caixas na mesma hora, entao os dois piscam juntos.
+  var icones = document.querySelectorAll('#listaProg .prog img');
+  for (var j = 0; j < icones.length; j++) {
+    if (estado.etQuadros && estado.etQuadros.length) {
+      icones[j].src = estado.etQuadros[quadroEt()];
+    } else if (estado.imagens && estado.imagens.et) {
+      icones[j].src = estado.imagens.et;
+    }
   }
   medirTrilho('cxProg', 'polegarProg', estado.programas.length);
 }
@@ -293,18 +309,27 @@ function fracRolagem(rol) {
   return Math.max(0, Math.min(1, rol.scrollTop / max));
 }
 
-/* o ET pisca: o mesmo relogio de 220 ms do WinForms */
+/* o ET pisca: o mesmo relogio de 220 ms do WinForms. Um unico relogio
+   para o ET da barra E para o do lado do nome do programa, para os dois
+   piscarem sempre no mesmo quadro. */
+var ET_T0 = Date.now();
+function quadroEt() {
+  if (!estado.etQuadros || !estado.etQuadros.length) return 0;
+  return Math.floor((Date.now() - ET_T0) / ET_MS) % estado.etQuadros.length;
+}
 var etTimer = null;
 function mostrarEt(quadros) {
   estado.etQuadros = quadros || [];
   if (!estado.etQuadros.length) return;
   if (etTimer) clearInterval(etTimer);
   var pisca = function () {
-    var todas = document.querySelectorAll('.cx:not(.semRolagem) .polegar img');
-    if (!todas.length) return;
     var q = estado.etQuadros;
-    var f = q[Math.floor(Date.now() / ET_MS) % q.length];
-    for (var i = 0; i < todas.length; i++) todas[i].src = f;
+    if (!q.length) return;
+    var f = q[quadroEt()];
+    var barras = document.querySelectorAll('.cx:not(.semRolagem) .polegar img');
+    for (var i = 0; i < barras.length; i++) barras[i].src = f;
+    var icones = document.querySelectorAll('#listaProg .prog img');
+    for (var j = 0; j < icones.length; j++) icones[j].src = f;
   };
   pisca();
   etTimer = setInterval(pisca, ET_MS);
