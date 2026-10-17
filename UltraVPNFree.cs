@@ -462,15 +462,28 @@ namespace UltraVPN
                             if (dono != null) try { dono.LiberarJanela(); } catch { }
                             try { web.Focus(); } catch { }
                             Mandar("imagens", new Dictionary<string, object> {
-                                { "fundo", "https://uvpn.local/fundo.alien.jpg" },
-                                { "goku", "https://uvpn.local/fundo.goku.jpg" },
-                                { "logo",  "https://uvpn.local/alien.escuro.png" },
-                                { "ico",   "https://uvpn.local/alien.claro.png" }
+                                // caminhos SEM BARRA no começo: assim o
+                                // navegador resolve junto com a pasta da
+                                // tela, e nao depende de nenhum dominio
+                                { "fundo", "fundo.alien.jpg" },
+                                { "goku",  "fundo.goku.jpg" },
+                                { "logo",  "alien.escuro.png" },
+                                { "ico",   "alien.claro.png" }
                             });
                             if (dono != null) dono.TelaPronta();
                         };
 
-                        core.Navigate("https://uvpn.local/index.html");
+                        // A TELA ABRE DA PASTA, COM file:///
+                        // Antes era um dominio falso (https://uvpn.local)
+                        // mapeado para a pasta. Medido: uma navegacao para
+                        // esse nome levava 2.029 ms, e uma pagina de 35
+                        // bytes nele levava 2.012 ms - enquanto about:blank
+                        // levava 5,9 ms. O atraso NAO era o WebView2 nem a
+                        // nossa tela: era o nome. Terminar em .local faz o
+                        // Windows tentar resolver por mDNS e esperar o
+                        // tempo estourar antes de o navegador usar o
+                        // mapeamento. Com file:/// a tela entrou em 0,81 s.
+                        core.Navigate("file:///" + Pasta().Replace('\\', '/').TrimEnd('/') + "/index.html");
                     }
                     catch (Exception erro)
                     {
