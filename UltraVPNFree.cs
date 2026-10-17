@@ -3269,7 +3269,7 @@ public static string UrbanGetServers(string accsToken)
             btnPing.Text = "Medir ping";
             btnPing.Location = new Point(410, 72);
             btnPing.Size = new Size(94, 28);
-            btnPing.Click += delegate { MedirTudo(); };
+            btnPing.Visible = false;   // medicao de ping/velocidade removida
             Controls.Add(btnPing);
 
             // ---------------- tipo de tunel ----------------
@@ -4175,7 +4175,7 @@ void MandarPaises()
                             return;
                         }
                     case "atualizar": TelaAtualizar(); return;
-                    case "medirPing": MedirTudo(); return;
+                    case "medirPing": return;
                     case "mudarPais":
                         {
                             object v; m.TryGetValue("iso", out v);
@@ -5860,11 +5860,8 @@ Bitmap MontarFundoCover()
             foreach (var s in nova) if (s.Port > 0) comPorta.Add(s.IP);
             var limpos = new List<Servidor>();
             var vistosFim = new HashSet<string>();
-            int ipRuim = 0;
             foreach (var s in nova)
             {
-                // IP que nao pode ser de uma maquina nunca entra na lista
-                if (!IpDeHost(s.IP)) { ipRuim++; continue; }
                 if (s.Port <= 0 && comPorta.Contains(s.IP)) continue;   // a de porta manda
                 // quem ja deu certo NUNCA e filtered por falta de sonda: a
                 // fonte pode deixar de anunciar, mas ele continua valendo
@@ -5887,13 +5884,7 @@ Bitmap MontarFundoCover()
                 limpos.Add(s);
             }
             nova = limpos;
-            // quem ja deixou o usuario conectado volta, mesmo se a fonte
-            // parou de anunciar (e o que falhou volta tambem, se a fonte
-            // trouxer de novo - ai entra pelo caminho normal, acima)
-            TrazerBonsDeVolta(nova);
             servers = nova;
-            if (ipRuim > 0)
-                Log(ipRuim + " servidores fora da lista por trazerem IP invalido (a fonte mandou numero quebrado).");
             if (sortCol < 0) OrdenarPadrao();
             AtualizarLista();
             if (foraAmericas > 0) Log(foraAmericas + " servidores fora da America do Sul foram tirados da lista (Brasil, America Central, Norte, India, Japao, Europa...).");
@@ -6406,20 +6397,7 @@ Bitmap MontarFundoCover()
                                + (ovpns > 0 ? ", " + ovpns + " .ovpn baixados" : "") + ".";
                     try { if (!saindo) Log(msg); } catch { }
 
-                    // AO ENTRAR NO PROGRAMA: depois de buscar as fontes, mede
-                    // o ping E a velocidade de uma vez. Sem isto a tabela
-                    // ficava varios segundos com o ping em "-" e a
-                    // velocidade vazia, e o usuario tinha que apertar o botao.
-                    try
-                    {
-                        new Thread(new ThreadStart(delegate
-                        {
-                            System.Threading.Thread.Sleep(900);
-                            try { if (!saindo && !disposing) BeginInvoke((Action)delegate { MedirTudo(); }); }
-                            catch { }
-                        })).Start();
-                    }
-                    catch { }
+
                 }
                 catch { }
             });
@@ -6927,107 +6905,6 @@ Bitmap MontarFundoCover()
             catch { }
         }
 
-        // ============================================================
-        //  MEDICAO DE PING (botao "Medir ping")
-        // ============================================================
-        // ---------------- VELOCIDADE ----------------
-        // A velocidade de cada servidor e o QUE A FONTE MEDIU (o telexy e a
-        // lista publica mandam speed junto com o servidor). Nao da para
-        // medir daqui sem abrir um tunel em cada servidor - o que da e pedir
-        // as fontes de novo e atualizar o numero de quem continua na lista.
-        void MedirVelocidades()
-        {
-            try
-            {
-                var jobs = new List<string[]>();
-                foreach (var p in Dados.PvlPaises)
-                {
-                    if (!TemPaisNaLista(p.ISO)) continue;
-                    if (p.TemPvl && !String.IsNullOrEmpty(p.Slug)) jobs.Add(new string[] { "pvl", p.ISO + "|" + p.Slug });
-                    jobs.Add(new string[] { "tlx", p.ISO + "|" });
-                }
-                if (jobs.Count == 0) return;
-
-                Log("Medindo a velocidade nos " + jobs.Count + " enderecos das fontes...");
-                var vel = new Dictionary<string, long>();
-                var lote = new List<Thread>();
-                foreach (var j in jobs)
-                {
-                    var job = j;
-                    var t = new Thread(new ThreadStart(delegate
-                    {
-                        try
-                        {
-                            var partes = job[1].Split('|');
-                            string iso = partes[0];
-                            string url = job[0] == "tlx" ? Dados.TlxUrl + "/vpn?country=" + iso + "&limit=50"
-                                      : Dados.PvlUrl + "/country/" + partes[1] + "/";
-                            var txt = PegarTexto(url, 20000);
-                            if (String.IsNullOrWhiteSpace(txt)) return;
-                            List<Servidor> novos = job[0] == "tlx" ? Rede.ParseTlxJson(txt, iso)
-                                                                    : Rede.ParsePvlPage(txt, iso);
-                            if (novos == null) return;
-                            lock (vel)
-                                foreach (var ns in novos)
-                                    if (ns != null && ns.Speed > 0 && !vel.ContainsKey(ns.IP)) vel[ns.IP] = ns.Speed;
-                        }
-                        catch { }
-                    }));
-                    t.IsBackground = true;
-                    t.Start();
-                    lote.Add(t);
-                    // 6 por vez, e ESPERA o lote terminar antes do proximo:
-                    // sem essa espera a funcao contava as velocidades antes
-                    // de elas chegarem e dava 0
-                    if (lote.Count >= 6)
-                    {
-                        foreach (var x in lote) { try { x.Join(); } catch { } }
-                        lote.Clear();
-                        Thread.Sleep(120);
-                    }
-                }
-                foreach (var x in lote) { try { x.Join(); } catch { } }
-
-                int mudou = 0;
-                foreach (var s in servers)
-                {
-                    if (s == null) continue;
-                    long v;
-                    if (vel.TryGetValue(s.IP, out v) && v > 0 && s.Speed != v) { s.Speed = v; mudou++; }
-                }
-                Log("Velocidade atualizada em " + vel.Count + " servidores (" + mudou + " mudaram).");
-                try { if (telaWeb) EnviarLista(); } catch { }
-            }
-            catch (Exception e) { try { Log("Nao deu para medir a velocidade: " + e.Message); } catch { } }
-        }
-
-        // o IP pode ser o endereco de uma maquina de verdade? Rejeita o que a
-        // fonte mandou quebrado. Medido no telexy: veio 38.25.50.0 (Trujillo,
-        // Peru) em DUAS portas - .0 e o endereco da rede, nao de uma
-        // maquina, e nao responde nem no ping. Fonte com numero quebrado e
-        // problema da fonte, nao nosso.
-        static bool IpDeHost(string ip)
-        {
-            if (String.IsNullOrWhiteSpace(ip)) return false;
-            var m = Regex.Match(ip.Trim(), @"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$");
-            if (!m.Success) return false;
-            int a, b, c, d;
-            if (!Int32.TryParse(m.Groups[1].Value, out a)) return false;
-            if (!Int32.TryParse(m.Groups[2].Value, out b)) return false;
-            if (!Int32.TryParse(m.Groups[3].Value, out c)) return false;
-            if (!Int32.TryParse(m.Groups[4].Value, out d)) return false;
-            if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-            if (a == 0) return false;                       // "este" / 0.0.0.0
-            if (a >= 224) return false;                     // multicast e reserva
-            if (a == 127) return false;                     // loopback
-            if (a == 10) return false;                      // rede interna
-            if (a == 172 && b >= 16 && b <= 31) return false;
-            if (a == 192 && b == 168) return false;
-            if (a == 169 && b == 254) return false;         // link-local
-            if (d == 0 || d == 255) return false;           // rede e broadcast
-            return true;
-        }
-
         // ---------------- os que ja deram certo ----------------
         // Guardado em arquivo para atravessar as fechadas do programa: o que
         // ja deixou o usuario conectado nao some da lista nunca mais.
@@ -7051,42 +6928,6 @@ Bitmap MontarFundoCover()
             catch { }
         }
 
-        // quem ja deu certo e a fonte parou de anunciar volta para a lista
-        void TrazerBonsDeVolta(List<Servidor> lista)
-        {
-            try
-            {
-                foreach (var l in Store.LerBons())
-                {
-                    var p = l.Split(';');
-                    if (p.Length < 4) continue;
-                    string ip = p[0].Trim(), proto = p[2].Trim(), iso = p[3].Trim();
-                    int porta = 0;
-                    Int32.TryParse(p[1].Trim(), out porta);
-                    if (String.IsNullOrEmpty(ip) || porta <= 0) continue;
-                    if (String.IsNullOrEmpty(proto)) continue;
-                    if (!Dados.EhLatina(iso)) continue;
-                    if (!IpDeHost(ip)) continue;
-                    bool jaTem = false;
-                    foreach (var s in lista)
-                        if (s != null && s.IP == ip) { jaTem = true; break; }
-                    if (jaTem) continue;
-                    lista.Add(new Servidor
-                    {
-                        IP = ip,
-                        Port = porta,
-                        Proto = proto,
-                        ISO = iso,
-                        Name = (p.Length > 4 && !String.IsNullOrEmpty(p[4])) ? p[4] : Dados.GetCountryName(iso),
-                        Src = "guardado",
-                        Measured = -1
-                    });
-                    Log("  " + ip + ":" + porta + " voltou para a lista (ja tinha conectado).");
-                }
-            }
-            catch { }
-        }
-
         bool TemPaisNaLista(string iso)
         {
             try
@@ -7096,144 +6937,6 @@ Bitmap MontarFundoCover()
             }
             catch { }
             return false;
-        }
-
-        // ============================================================
-        //  MEDIR TUDO: o ping E a velocidade
-        // ============================================================
-        void MedirTudo()
-        {
-            if (servers.Count == 0) return;
-            btnPing.Enabled = false;
-            btnRefresh.Enabled = false;
-            UseWaitCursor = true;
-            lblStatus.Text = "Status: medindo seu ping...";
-            Log("Medindo o SEU ping em todos os servidores ao mesmo tempo...");
-            // a velocidade vem logo atras, no fim da medicao do ping: e o
-            // que o botao promete ("Medir ping") e o que o usuario espera
-            // ver preenchido ao entrar no programa
-            // mede TODOS (eram so 60: o resto ficava com "-" para sempre)
-            var alvo = servers.ToList();
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                try
-                {
-                    // 3 ecos por servidor e vale o MENOR: 1 eco sozinho pega picos de
-                    // jitter e o numero mente; o minimo e o tempo real da rota.
-                    // TODOS EM PARALELO: o Ping do .NET dispara as sondas de uma vez
-                    var sondas = new List<object[]>();
-                    foreach (var s in alvo)
-                    {
-                        for (int eco = 0; eco < 3; eco++)
-                        {
-                            try
-                            {
-                                var pg = new Ping();
-                                var tsk = pg.SendPingAsync(s.IP, 700);
-                                sondas.Add(new object[] { s, pg, tsk });
-                            }
-                            catch { }
-                        }
-                    }
-                    var lim = Stopwatch.StartNew();
-                    while (lim.ElapsedMilliseconds < 2600)
-                    {
-                        bool pendente = false;
-                        foreach (var it in sondas) if (!((Task)it[2]).IsCompleted) { pendente = true; break; }
-                        if (!pendente) break;
-                        Thread.Sleep(20);
-                    }
-                    var melhor = new Dictionary<string, int>();
-                    foreach (var it in sondas)
-                    {
-                        var s = (Servidor)it[0];
-                        try
-                        {
-                            var tsk = (Task<PingReply>)it[2];
-                            if (tsk.IsCompleted && !tsk.IsFaulted)
-                            {
-                                var rep = tsk.Result;
-                                if (rep != null && rep.Status == IPStatus.Success)
-                                {
-                                    int ms = (int)rep.RoundtripTime;
-                                    int atual;
-                                    if (!melhor.TryGetValue(s.IP, out atual) || ms < atual) melhor[s.IP] = ms;
-                                }
-                            }
-                        }
-                        catch { }
-                        try { ((IDisposable)it[1]).Dispose(); } catch { }
-                    }
-                    foreach (var s in alvo)
-                    {
-                        int m;
-                        if (melhor.TryGetValue(s.IP, out m)) { s.Measured = m; RegistrarPing(s.IP, m); }
-                    }
-                    // ICMP bloqueado nao quer dizer "sem ping": completa com a sonda real
-                    var falta = alvo.Where(s => s.Measured < 0).ToList();
-                    if (falta.Count > 0)
-                    {
-                        var r = Rede.MedirRtts(falta);
-                        foreach (var s in falta)
-                        {
-                            int m;
-                            if (r.TryGetValue(s.IP, out m) && m >= 0) { s.Measured = m; RegistrarPing(s.IP, m); }
-                        }
-                    }
-                    BeginInvoke((Action)delegate
-                    {
-                        try
-                        {
-                            // depois de medir, mostra do menor ping para o maior (eram os sem
-                            // medida que ficavam em cima e parecia que nao mediu nada)
-                            sortCol = 2; sortAsc = true;
-                            OrdenarLista();
-                            AtualizarLista();
-                            var best = servers.FirstOrDefault(s2 => s2.Measured >= 0);
-                            if (best != null)
-                                Log("Melhor ping: " + Dados.GetServerLocal(best) + " (" + best.IP + ") com " + best.Measured + " ms.");
-                            else
-                                Log("Nenhum servidor respondeu ao ping agora.");
-                        }
-                        catch { }
-                        btnPing.Enabled = true;
-                        btnRefresh.Enabled = true;
-                        UseWaitCursor = false;
-                        // VELOCIDADE: o botao mede ping E velocidade. A
-                        // medicao roda na propria thread do ping (ja estamos
-                        // fora da fila da interface) e so volta para a tela
-                        // quando acaba.
-                        try
-                        {
-                            new Thread(new ThreadStart(delegate
-                            {
-                                try
-                                {
-                                    MedirVelocidades();
-                                    BeginInvoke((Action)delegate
-                                    {
-                                        try { AtualizarLista(); } catch { }
-                                        btnPing.Enabled = true;
-                                        btnRefresh.Enabled = true;
-                                    });
-                                }
-                                catch { }
-                            })).Start();
-                        }
-                        catch { }
-                    });
-                }
-                catch
-                {
-                    BeginInvoke((Action)delegate
-                    {
-                        btnPing.Enabled = true;
-                        btnRefresh.Enabled = true;
-                        UseWaitCursor = false;
-                        AtualizarLista();
-                    });
-                }
-            });
         }
 
         // ============================================================
