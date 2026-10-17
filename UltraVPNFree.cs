@@ -1,4 +1,4 @@
-// =====================================================================
+﻿// =====================================================================
 //  ULTRA VPN FREE - EDICAO 100% C# (SEM MOTOR POWERSHELL)
 //  Porta fiel do app original: as 4 fontes de servidores,
 //  lista com grupos das tres Americas + ordenacao por coluna, ping preciso
@@ -31,9 +31,416 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 
 namespace UltraVPN
 {
+    // =================================================================
+    //  CARREGADOR DAS DLLs DO WEBVIEW2
+    // =================================================================
+    // As duas DLLs gerenciadas do WebView2 vao embutidas no .exe. Como o
+    // programa e de arquivo unico, elas nao estao do lado do exe e o JIT
+    // nao as acha -> o programa quebraria na hora de abrir a tela.
+    //
+    // Esta classe fica DE PROPÓSITO sem nenhuma referencia a tipo do
+    // WebView2: se ela citasse WebView2, o JIT precisaria da DLL antes
+    // do AssemblyResolve existir, e oprograma cairia antes de chance de
+    // tentar qualquer coisa. Aqui so entra System.Reflection.
+    // =================================================================
+    static class Wv2
+    {
+        static string Dir()
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Ultra VPN Free", "web");
+            try { if (!Directory.Exists(dir)) Directory.CreateDirectory(dir); }
+            catch { }
+            return dir;
+        }
+
+        static void Extrair(string recurso, string destino)
+        {
+            try
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                using (var rs = asm.GetManifestResourceStream(recurso))
+                {
+                    if (rs == null) return;
+                    var ms = new MemoryStream();
+                    rs.CopyTo(ms);
+                    var dados = ms.ToArray();
+                    if (File.Exists(destino) && new FileInfo(destino).Length == dados.Length) return;
+                    File.WriteAllBytes(destino, dados);
+                }
+            }
+            catch { }
+        }
+
+        // Chamar no começo do Main, ANTES de qualquer coisa tocar no
+        // WebView2. Devolve false quando nao deu: nesse caso o programa
+        // continua funcionando com a tela antiga do WinForms.
+        public static bool Instalar()
+        {
+            try
+            {
+                string dir = Dir();
+                Extrair("wv2.Core.dll", Path.Combine(dir, "Microsoft.Web.WebView2.Core.dll"));
+                Extrair("wv2.WinForms.dll", Path.Combine(dir, "Microsoft.Web.WebView2.WinForms.dll"));
+
+                AppDomain.CurrentDomain.AssemblyResolve += delegate (object s, ResolveEventArgs a)
+                {
+                    try
+                    {
+                        var nome = new System.Reflection.AssemblyName(a.Name).Name;
+                        if (nome == null) return null;
+                        if (nome != "Microsoft.Web.WebView2.Core" &&
+                            nome != "Microsoft.Web.WebView2.WinForms") return null;
+                        var arquivo = Path.Combine(dir, nome + ".dll");
+                        if (!File.Exists(arquivo)) return null;
+                        return System.Reflection.Assembly.LoadFrom(arquivo);
+                    }
+                    catch { return null; }
+                };
+                return true;
+            }
+            catch { return false; }
+        }
+    }
+
+    // =================================================================
+    //  TELA EM WEBVIEW2
+    // =================================================================
+    // A interface passou a ser HTML/CSS/JS dentro do WebView2. O programa
+    // continua sendo UM .exe so: a WebView2Loader e os arquivos da tela
+    // vao embutidos como recurso e sao extraidos para uma pasta propria
+    // na primeira execucao.
+    //
+    // Por que funciona num .exe unico: o WebView2 precisa da
+    // WebView2Loader.dll (nativa) do lado do assembly gerenciado. Como o
+    // .exe nao tem arquivos do lado, a DLL e extraida e carregada na mao
+    // com LoadLibrary ANTES de criar o ambiente - assim a procura nativa
+    // do WebView2 acha o modulo ja carregado, sem depender de caminho.
+    // As duas DLLs gerenciadas sao resolvidas pelo Wv2 (ver acima).
+    // =================================================================
+    static class TelaWeb
+    {
+        static WebView2 wv;
+        static CoreWebView2 cw;
+        static Janela dono;
+        static bool pronto = false;
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern IntPtr LoadLibrary(string lpLibFileName);
+
+        [DllImport("kernel32.dll")]
+        static extern bool FreeLibrary(IntPtr hModule);
+
+        static IntPtr modLoader = IntPtr.Zero;
+
+        // a pasta onde a tela mora (extraida uma vez)
+        public static string Pasta()
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Ultra VPN Free", "web");
+            try { if (!Directory.Exists(dir)) Directory.CreateDirectory(dir); }
+            catch { }
+            return dir;
+        }
+
+        // ---------------------------------------------------------------
+        //  EXTRAIR um recurso embutido para a pasta da tela
+        // ---------------------------------------------------------------
+        static bool ExtrairRecurso(string recurso, string destino)
+        {
+            try
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                using (var rs = asm.GetManifestResourceStream(recurso))
+                {
+                    if (rs == null) return false;
+                    var ms = new MemoryStream();
+                    rs.CopyTo(ms);
+                    var dados = ms.ToArray();
+                    // ja esta no lugar e com o mesmo tamanho? nao reescreve
+                    if (File.Exists(destino) && new FileInfo(destino).Length == dados.Length) return true;
+                    File.WriteAllBytes(destino, dados);
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // ---------------------------------------------------------------
+        //  Carrega a WebView2Loader antes de tudo (ponto do .exe unico)
+        // ---------------------------------------------------------------
+        static bool CarregarLoader()
+        {
+            if (modLoader != IntPtr.Zero) return true;
+            bool x64 = Environment.Is64BitProcess;
+            string nome = x64 ? "WebView2Loader.x64.dll" : "WebView2Loader.x86.dll";
+            string destino = Path.Combine(Pasta(), x64 ? "WebView2Loader.dll" : "WebView2Loader.dll");
+            if (!ExtrairRecurso(nome, destino)) return false;
+            try
+            {
+                modLoader = LoadLibrary(destino);
+                return modLoader != IntPtr.Zero;
+            }
+            catch { return false; }
+        }
+
+        // ---------------------------------------------------------------
+        //  Extrai os arquivos da tela (html, css, js e as imagens)
+        // ---------------------------------------------------------------
+        static bool ExtrairTela()
+        {
+            var p = Pasta();
+            bool ok = true;
+            ok &= ExtrairRecurso("uvpn.ui.index.html", Path.Combine(p, "index.html"));
+            ok &= ExtrairRecurso("uvpn.ui.app.css", Path.Combine(p, "app.css"));
+            ok &= ExtrairRecurso("uvpn.ui.app.js", Path.Combine(p, "app.js"));
+            // as imagens sao as mesmas que ja estavam embutidas no .exe
+            ok &= ExtrairRecurso("fundo.alien.jpg", Path.Combine(p, "fundo.alien.jpg"));
+            ok &= ExtrairRecurso("fundo.goku.jpg", Path.Combine(p, "fundo.goku.jpg"));
+            ok &= ExtrairRecurso("alien.escuro.png", Path.Combine(p, "alien.escuro.png"));
+            ok &= ExtrairRecurso("alien.claro.png", Path.Combine(p, "alien.claro.png"));
+            ok &= ExtrairRecurso("tray.gif", Path.Combine(p, "tray.gif"));
+            return ok;
+        }
+
+        // ---------------------------------------------------------------
+        //  IMAGEM -> data URI (para o HTML nao precisar de arquivo)
+        // ---------------------------------------------------------------
+        public static string DataUri(Image img, int lado)
+        {
+            if (img == null) return "";
+            try
+            {
+                using (var b = new Bitmap(lado, lado))
+                {
+                    using (var g = Graphics.FromImage(b))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.Clear(Color.Transparent);
+                        g.DrawImage(img, new Rectangle(0, 0, lado, lado));
+                    }
+                    using (var ms = new MemoryStream())
+                    {
+                        b.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                        return "data:image/png;base64," +
+                               Convert.ToBase64String(ms.ToArray());
+                    }
+                }
+            }
+            catch { return ""; }
+        }
+
+        public static string IconeDataUri(System.Drawing.Icon ic)
+        {
+            if (ic == null) return "";
+            try
+            {
+                using (var b = ic.ToBitmap())
+                    return DataUri(b, 64);
+            }
+            catch { return ""; }
+        }
+
+        // ---------------------------------------------------------------
+        //  MANDO MENSAGEM PARA A TELA
+        // ---------------------------------------------------------------
+        public static void Mandar(string tipo, object dados)
+        {
+            if (!pronto || cw == null) return;
+            try
+            {
+                var ser = new JavaScriptSerializer();
+                var o = dados as IDictionary<string, object>;
+                if (o == null) o = new Dictionary<string, object>();
+                o["tipo"] = tipo;
+                var js = ser.Serialize(o);
+
+                // o WebView2 so aceita ser tocado na thread da interface. O
+                // Log() e chamado das sondas (threads de fundo), entao aqui
+                // se precisa voltar para a thread antes de postar.
+                if (forma != null && forma.InvokeRequired)
+                {
+                    forma.BeginInvoke((Action)delegate
+                    {
+                        try { if (cw != null) cw.ExecuteScriptAsync("uvfn_recebe(" + js + ");"); }
+                        catch (Exception e) { Rastro("Mandar " + tipo + " FALHOU: " + e.Message); }
+                    });
+                    return;
+                }
+                // chama a funcao da tela direto. O caminho antigo era
+                // PostWebMessageAsJson, que nao chegava: o postMessage do
+                // JS para o C# funcionava, mas o inverso nao.
+                cw.ExecuteScriptAsync("uvfn_recebe(" + js + ");");
+            }
+            catch (Exception e) { Rastro("Mandar " + tipo + " FALHOU: " + e.Message); }
+        }
+
+        // a janela que hospeda a tela (para voltar para a thread dela)
+        static Form forma = null;
+
+        // rastro da tela: deixa em erro.txt o que entrou e o que saiu
+        public static void Rastro(string linha)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(Pasta(), "erro.txt"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + "  " + linha + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        public static void Mandar(string tipo)
+        {
+            Mandar(tipo, new Dictionary<string, object>());
+        }
+
+        public static bool EstaPronto { get { return pronto; } }
+
+        // desliga a tela web (o Runtime faltou): some com o controle e
+        // devolve a janela para o desenho antigo do WinForms
+        public static void Desligar()
+        {
+            try { pronto = false; } catch { }
+            try
+            {
+                if (wv != null)
+                {
+                    var f = wv.Parent;
+                    wv.Dispose();
+                    wv = null;
+                    if (f != null) f.Controls.RemoveAt(f.Controls.Count - 1);
+                }
+            }
+            catch { }
+            cw = null;
+        }
+
+        // ---------------------------------------------------------------
+        //  LIGA A TELA
+        // ---------------------------------------------------------------
+        public static bool Ligar(Form f, Janela j)
+        {
+            var ui = f;
+            try
+            {
+                if (!CarregarLoader()) return false;
+                if (!ExtrairTela()) return false;
+
+                dono = j;
+                forma = f;
+                // o WebView2 e um controle Windows de verdade: a janela
+                // precisa ter handle. Sem isso o BeginInvoke estoura e a
+                // tela nunca entra (e o programa fica so com o WinForms).
+                try { if (!ui.IsHandleCreated) ui.CreateControl(); } catch { }
+                if (!ui.IsHandleCreated) return false;
+
+                // tudo na thread da interface: o controle WebView2 nao pode
+                // ser criado de fora
+                ui.BeginInvoke((Action)(async delegate
+                {
+                    try
+                    {
+                        var opts = new CoreWebView2EnvironmentOptions();
+                        // PRIMEIRO parametro (pasta do navegador) tem que
+                        // ser null: e o que diz ao WebView2 para usar o
+                        // Runtime JA INSTALADO no Windows. Se mandar uma
+                        // pasta aqui, ele procura o Edge DENTRO dela, nao
+                        // acha e diz que nao existe Runtime nenhum.
+                        // O segundo parametro e onde ficam os dados do
+                        // navegador (cache, cookies da tela).
+                        var dados = Path.Combine(Pasta(), "dados");
+                        try { if (!Directory.Exists(dados)) Directory.CreateDirectory(dados); } catch { }
+                        var env = await CoreWebView2Environment.CreateAsync(null, dados, opts);
+
+                        var web = new WebView2();
+                        web.Dock = DockStyle.Fill;
+                        ui.Controls.Add(web);
+                        web.BringToFront();
+                        await web.EnsureCoreWebView2Async(env);
+
+                        var core = web.CoreWebView2;
+                        if (core == null) return;
+                        wv = web;
+                        cw = core;
+
+                        var st = core.Settings;
+                        st.AreDefaultContextMenusEnabled = false;
+                        st.AreDevToolsEnabled = false;
+                        st.AreHostObjectsAllowed = false;
+                        st.IsStatusBarEnabled = false;
+                        st.IsZoomControlEnabled = false;
+
+                        core.SetVirtualHostNameToFolderMapping(
+                            "uvpn.local", Pasta(),
+                            CoreWebView2HostResourceAccessKind.DenyCors);
+
+                        core.WebMessageReceived += delegate (object s, CoreWebView2WebMessageReceivedEventArgs e)
+                        {
+                            try { Receber(e.WebMessageAsJson); }
+                            catch { }
+                        };
+
+                        core.NavigationCompleted += delegate (object s, CoreWebView2NavigationCompletedEventArgs e)
+                        {
+                            if (!e.IsSuccess) return;
+                            pronto = true;
+                            try { web.Focus(); } catch { }
+                            Mandar("imagens", new Dictionary<string, object> {
+                                { "fundo", "https://uvpn.local/fundo.alien.jpg" },
+                                { "goku", "https://uvpn.local/fundo.goku.jpg" },
+                                { "logo",  "https://uvpn.local/alien.escuro.png" },
+                                { "ico",   "https://uvpn.local/alien.claro.png" }
+                            });
+                            if (dono != null) dono.TelaPronta();
+                        };
+
+                        core.Navigate("https://uvpn.local/index.html");
+                    }
+                    catch (Exception erro)
+                    {
+                        // grava o motivo real: sem isto so se sabe que "nao
+                        // deu" e nao o QUE deu (e descobrir custou caro)
+                        try
+                        {
+                            File.WriteAllText(Path.Combine(Pasta(), "erro.txt"),
+                                DateTime.Now.ToString("s") + Environment.NewLine +
+                                erro.ToString());
+                        }
+                        catch { }
+                        // o WebView2 nao entrou: fica valendo a janela antiga
+                        try { if (dono != null) dono.TelaWebFalhou(); } catch { }
+                    }
+                }));
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // ---------------------------------------------------------------
+        //  MENSAGEM VINDO DA TELA
+        // ---------------------------------------------------------------
+        static void Receber(string json)
+        {
+            var ser = new JavaScriptSerializer();
+            Dictionary<string, object> m;
+            try { m = ser.Deserialize<Dictionary<string, object>>(json); }
+            catch { return; }
+            if (m == null) return;
+            object acao;
+            if (!m.TryGetValue("acao", out acao)) return;
+            Rastro("Recebeu da tela: " + Convert.ToString(acao));
+            if (dono == null) return;
+            try { dono.DoAcao(Convert.ToString(acao), m); }
+            catch { }
+        }
+    }
     // =================================================================
     //  ENTRADA DO PROGRAMA
     // =================================================================
@@ -50,6 +457,13 @@ namespace UltraVPN
         {
             // as fontes usam TLS 1.2 (o alvo 4.0 do compilador nao liga por padrao)
             try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)768 | SecurityProtocolType.Tls; } catch { }
+
+            // as DLLs do WebView2 sao embutidas no .exe e precisam estar
+            // resolvidas ANTES de qualquer linha tocar no WebView2. Se nao
+            // der (Runtime ausente, pasta sem permissao), o programa segue
+            // com a tela antiga do WinForms - nunca quebra.
+            try { Wv2.Instalar(); } catch { }
+
             foreach (var a in args)
             {
                 var t = (a ?? "").Trim().TrimStart('-', '/').ToLowerInvariant();
@@ -85,7 +499,19 @@ namespace UltraVPN
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Janela());
+            try { Application.Run(new Janela()); }
+            catch (Exception e)
+            {
+                // rede de seguranca: se a tela web (ou qualquer outra coisa)
+                // derrubar o programa na hora de abrir, ainda mostra o que
+                // aconteceu em vez de sumir sem aviso
+                try
+                {
+                    MessageBox.Show("O Ultra VPN Free encontrou um erro:\n\n" + e.Message,
+                        "Ultra VPN Free", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch { }
+            }
         }
 
         public static bool EAdmin()
@@ -2413,6 +2839,7 @@ public static string UrbanGetServers(string accsToken)
         // estado
         string temaAtual = "ets";
         bool suppressUi = false;
+        bool telaWeb = false;
         bool connected = false;
         bool exiting = false;
         bool minTray = true;
@@ -2505,7 +2932,7 @@ public static string UrbanGetServers(string accsToken)
             Store.Init();
             Text = "Ultra VPN Free - t\u00fanel por aplicativo";
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(916, 756);
+            Size = new Size(917, 756);
             MinimumSize = new Size(760, 640);
             BackColor = Color.FromArgb(6, 18, 20);
             Font = new Font("Segoe UI", 9);
@@ -3108,6 +3535,18 @@ public static string UrbanGetServers(string accsToken)
                 try { lv.Width = ClientSize.Width - lv.Left; } catch { }
                 try { lbLog.Width = ClientSize.Width - lbLog.Left; } catch { }
                 try { AplicarTema(); } catch { }
+
+                // ============================================================
+                //  TELA EM WEBVIEW2
+                // Só aqui: antes do Load a janela ainda não tem handle, e o
+                // WebView2 (que é um controle Windows de verdade) não pode ser
+                // criado. A janela continua sendo a mesma (form, bandeja,
+                // ícone); o que muda é que o miolo vira HTML. Se o WebView2
+                // não entrar (PC sem o Runtime), o desenho antigo continua.
+                // ============================================================
+                telaWeb = false;
+                try { telaWeb = TelaWeb.Ligar(this, this); }
+                catch { telaWeb = false; }
             };
 
             // ---------------- timers ----------------
@@ -3190,6 +3629,353 @@ public static string UrbanGetServers(string accsToken)
             // inicializa a lista de paises antes de mostrar
             PreencherPaises();
             AtualizarLista();
+        }
+
+        // ============================================================
+        //  PONTE ENTRE A TELA (HTML) E O PROGRAMA
+        // ============================================================
+
+        // chamada uma vez, quando a tela web terminou de carregar
+        public void TelaPronta()
+        {
+            try
+            {
+                // Os controles antigos NAO podem simplesmente sair da lista:
+                // Controls.Remove() nao destroi a janela nativa deles, e o
+                // ListView continuava pintando POR CIMA da tela (a tabela
+                // aparecia duas vezes). A solucao e mover os controles para
+                // uma janela escondida: eles continuam vivos (o codigo antigo
+                // ainda usa lbLog, lbApps, lv...) mas param de pintar.
+                if (baia == null)
+                {
+                    baia = new Form();
+                    baia.ShowInTaskbar = false;
+                    baia.WindowState = FormWindowState.Minimized;
+                    baia.Opacity = 0;
+                    baia.FormBorderStyle = FormBorderStyle.None;
+                }
+                var tirar = new List<Control>();
+                foreach (Control c in Controls) if (!(c is WebView2)) tirar.Add(c);
+                if (tirar.Count > 0)
+                {
+                    baia.Controls.AddRange(tirar.ToArray());
+                    baia.Hide();
+                }
+            }
+            catch { }
+            try
+            {
+                MandarPaises();
+                MandarTemas();
+                // os quadros do ET, sem o preto de fundo (o mesmo trabalho
+                // que o WinForms ja fazia para o polegar da barra)
+                MandarQuadrosEt();
+                EnviarProgramas();
+                EnviarLista();
+                EnviarEstado();
+                EnviarLogAntigo();
+                EnviarIP(currentIP);
+            }
+            catch (Exception e) { TelaWeb.Rastro("TelaPronta erro: " + e.Message); }
+        }
+
+        // janela de reserva onde os controles do WinForms ficam escondidos
+        Form baia = null;
+
+        // o WebView2 nao entrou (PC sem o Runtime): desfaz o esconderijo
+        // dos controles antigos e a janela volta a ser toda do WinForms
+        public void TelaWebFalhou()
+        {
+            try
+            {
+                telaWeb = false;
+                TelaWeb.Desligar();
+                foreach (Control c in Controls) c.Show();
+                Log("O Runtime do WebView2 nao esta neste PC - a tela antiga continua valendo.");
+            }
+            catch { }
+        }
+
+        // o ET que pisca: os 12 quadros do tray.gif, virados em data URI
+        void MandarQuadrosEt()
+        {
+            try
+            {
+                if (trayFramesBmp == null || trayFramesBmp.Count < 2) return;
+                var quadros = new List<object>();
+                for (int i = 0; i < trayFramesBmp.Count; i++)
+                {
+                    var uri = TelaWeb.DataUri(trayFramesBmp[i], 64);
+                    if (!String.IsNullOrEmpty(uri)) quadros.Add(uri);
+                }
+                if (quadros.Count < 2) return;
+                TelaWeb.Mandar("et", new Dictionary<string, object> { { "quadros", quadros } });
+            }
+            catch { }
+        }
+
+        void MandarTemas()
+        {
+            try
+            {
+                var lista = new List<object>();
+                for (int i = 0; i < Dados.TemaKeys.Length; i++)
+                {
+                    lista.Add(new Dictionary<string, object> {
+                        { "chave", Dados.TemaKeys[i] },
+                        { "nome", Dados.TemaTexts[i] }
+                    });
+                }
+                TelaWeb.Mandar("temas", new Dictionary<string, object> { { "temas", lista } });
+            }
+            catch { }
+        }
+
+void MandarPaises()
+        {
+            try
+            {
+                var lista = new List<object>();
+                for (int i = 0; i < Dados.RegiaoSul.Length; i++)
+                {
+                    var iso = Dados.RegiaoSul[i];
+                    lista.Add(new Dictionary<string, object> {
+                        { "iso", iso },
+                        { "nome", Dados.GetCountryName(iso) }
+                    });
+                }
+                TelaWeb.Mandar("paises", new Dictionary<string, object> { { "paises", lista } });
+            }
+            catch { }
+        }
+
+        // a lista de servidores vira as linhas da tabela
+        void EnviarLista()
+        {
+            if (!telaWeb) return;
+            try
+            {
+                var lista = new List<object>();
+                for (int i = 0; i < servers.Count; i++)
+                {
+                    var s = servers[i];
+                    string cid = "";
+                    try { cid = CidadeDe(s); } catch { }
+                    lista.Add(new Dictionary<string, object> {
+                        { "ip", s.IP },
+                        { "porta", s.Port },
+                        { "pais", Dados.GetCountryName(s.ISO) },
+                        { "cidade", cid },
+                        { "ping", s.Measured },
+                        { "vel", s.Speed },
+                        { "proto", String.IsNullOrEmpty(s.Proto) ? "auto" : s.Proto.ToUpperInvariant() }
+                    });
+                }
+                TelaWeb.Mandar("servidores", new Dictionary<string, object> { { "lista", lista } });
+            }
+            catch { }
+        }
+
+        void EnviarProgramas()
+        {
+            if (!telaWeb) return;
+            try
+            {
+                var lista = new List<object>();
+                for (int i = 0; i < appList.Count; i++)
+                {
+                    var p = appList[i];
+                    string ic = "";
+                    try
+                    {
+                        Icon achado;
+                        if (cacheIcones.TryGetValue(p.Path, out achado))
+                            ic = TelaWeb.IconeDataUri(achado);
+                    }
+                    catch { }
+                    lista.Add(new Dictionary<string, object> {
+                        { "nome", p.Name },
+                        { "caminho", p.Path },
+                        { "icone", ic }
+                    });
+                }
+                TelaWeb.Mandar("programas", new Dictionary<string, object> { { "lista", lista } });
+            }
+            catch { }
+        }
+
+        void EnviarEstado()
+        {
+            if (!telaWeb) return;
+            try
+            {
+                TelaWeb.Mandar("estado", new Dictionary<string, object> {
+                    { "tema", temaAtual },
+                    { "protocolo", protocol },
+                    { "conectado", connected },
+                    { "servidorAtual", servidorAtual },
+                    { "ip", currentIP },
+                    { "fullTunnel", fullTunnel },
+                    { "autoRecon", autoRecon },
+                    { "startup", TestarStartup() },
+                    { "bootConn", bootConnect }
+                });
+            }
+            catch { }
+        }
+
+        void EnviarLogAntigo()
+        {
+            // o log novo ja vai direto para a tela; o historico antigo fica
+            // no arquivo (a tela comeca vazia, como o programa de antes)
+        }
+
+        void EnviarIP(string ip)
+        {
+            if (!telaWeb) return;
+            try { TelaWeb.Mandar("ip", new Dictionary<string, object> { { "ip", ip ?? "" } }); }
+            catch { }
+        }
+
+        void EnviarStatus(bool ligado, string servidor)
+        {
+            if (!telaWeb) return;
+            try
+            {
+                TelaWeb.Mandar("status", new Dictionary<string, object> {
+                    { "conectado", ligado },
+                    { "servidor", servidor ?? "" }
+                });
+            }
+            catch { }
+        }
+
+        // o que veio do clique na tela
+        public void DoAcao(string acao, Dictionary<string, object> m)
+        {
+            try
+            {
+                switch (acao)
+                {
+                    case "pronto": break;
+                    case "errojs":
+                        {
+                            object v; m.TryGetValue("texto", out v);
+                            TelaWeb.Rastro("ERRO NA TELA: " + Convert.ToString(v));
+                            return;
+                        }
+                    case "atualizar": TelaAtualizar(); return;
+                    case "medirPing": MedirTudo(); return;
+                    case "mudarPais":
+                        {
+                            object v; m.TryGetValue("iso", out v);
+                            countryFilter = Convert.ToString(v);
+                            AtualizarLista();
+                            return;
+                        }
+                    case "mudarProtocolo":
+                        {
+                            object v; m.TryGetValue("protocolo", out v);
+                            var p = Convert.ToString(v);
+                            if (Array.IndexOf(Dados.ProtoKeys, p) >= 0) protocol = p;
+                            SalvarEstado();
+                            EnviarEstado();
+                            return;
+                        }
+                    case "mudarTema":
+                        {
+                            object v; m.TryGetValue("tema", out v);
+                            var t = Convert.ToString(v);
+                            if (Array.IndexOf(Dados.TemaKeys, t) >= 0) { temaAtual = t; try { AplicarTema(); } catch { } }
+                            return;
+                        }
+                    case "mudarOpcao":
+                        {
+                            if (m.ContainsKey("fullTunnel")) fullTunnel = LeTruth(m["fullTunnel"]);
+                            if (m.ContainsKey("autoRecon")) autoRecon = LeTruth(m["autoRecon"]);
+                            if (m.ContainsKey("startup")) { try { DefinirStartup(LeTruth(m["startup"])); } catch { } }
+                            if (m.ContainsKey("bootConn")) bootConnect = LeTruth(m["bootConn"]);
+                            SalvarEstado();
+                            return;
+                        }
+                    case "escolherServidor":
+                        {
+                            object v; m.TryGetValue("ip", out v);
+                            var ip = Convert.ToString(v);
+                            for (int i = 0; i < servers.Count; i++)
+                                if (servers[i].IP == ip) { UltimoEscolhido = servers[i]; break; }
+                            return;
+                        }
+                    case "conectarDesconectar":
+                        if (connected) Desconectar(); else Conectar();
+                        return;
+                    case "adicionarPrograma": AdicionarPrograma(null); return;
+                    case "removerPrograma": RemoverProgramaSelecionado(); return;
+                    case "desinstalar": Desinstalar(); return;
+                    case "minimizar": WindowState = FormWindowState.Minimized; return;
+                    case "maximizar":
+                        WindowState = WindowState == FormWindowState.Maximized
+                                     ? FormWindowState.Normal : FormWindowState.Maximized;
+                        return;
+                    case "fechar": SairDoPrograma(); return;
+                }
+            }
+            catch { }
+        }
+
+        static bool LeTruth(object v)
+        {
+            if (v == null) return false;
+            var s = Convert.ToString(v).ToLowerInvariant();
+            return s == "true" || s == "1";
+        }
+
+        // o servidor que a pessoa escolheu na tela
+        Servidor UltimoEscolhido = null;
+
+        // o "Atualizar" da tela: exatamente o que o botao do WinForms faz
+        void TelaAtualizar()
+        {
+            try
+            {
+                if (dlTask != null && !dlTask.IsCompleted) { Log("J\u00e1 h\u00e1 uma atualiza\u00e7\u00e3o em andamento..."); return; }
+                Log("Atualizando a lista de servidores gr\u00e1tis...");
+                if (BaixarListaServidores() && btnRefresh != null) btnRefresh.Enabled = false;
+                IniciarFontesPublicas();
+                try
+                {
+                    if (penteTimer != null) { try { penteTimer.Stop(); } catch { } }
+                    penteTimer = new System.Windows.Forms.Timer();
+                    penteTimer.Interval = 3500;
+                    penteTimer.Tick += delegate { try { penteTimer.Stop(); } catch { } RevalidarFontes(); };
+                    penteTimer.Start();
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        // o nome do servidor: cidade quando a fonte sabe, senao o pais
+        string CidadeDe(Servidor s)
+        {
+            try { return Dados.GetServerLocal(s); }
+            catch { return ""; }
+        }
+
+        // "Remover" da tela: tira o programa marcado
+        void RemoverProgramaSelecionado()
+        {
+            try
+            {
+                if (lbApps == null || lbApps.SelectedIndex < 0) return;
+                var idx = lbApps.SelectedIndex;
+                if (idx < 0 || idx >= appList.Count) return;
+                appList.RemoveAt(idx);
+                try { SalvarEstado(); } catch { }
+                AtualizarListaProgramas();
+                EnviarProgramas();
+            }
+            catch { }
         }
 
         Image CarregarArquivo(string nome)
@@ -3339,6 +4125,16 @@ public static string UrbanGetServers(string accsToken)
         // ============================================================
         public void Log(string msg)
         {
+            // a tela web recebe a linha na hora; o WinForms continua
+            // recebendo pelo mesmo caminho (a fila) e nada se perde
+            if (telaWeb)
+            {
+                try
+                {
+                    TelaWeb.Mandar("log", new Dictionary<string, object> { { "texto", msg } });
+                }
+                catch { }
+            }
             lock (logFila) logFila.Enqueue(msg);
             // arquivo em segundo plano: nunca trava a janela por I/O de disco
             string linha = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + msg + Environment.NewLine;
@@ -4795,6 +5591,7 @@ public static string UrbanGetServers(string accsToken)
 
         void AtualizarLista()
         {
+            try { EnviarLista(); } catch { }
             if (InvokeRequired) { BeginInvoke((Action)AtualizarLista); return; }
             lv.BeginUpdate();
             // guarda quem estava clicado (o clique nao se perde na reconstrucao)
@@ -4872,6 +5669,7 @@ public static string UrbanGetServers(string accsToken)
 
         void AtualizarListaProgramas()
         {
+            try { EnviarProgramas(); } catch { }
             if (InvokeRequired) { BeginInvoke((Action)AtualizarListaProgramas); return; }
             lbApps.InvalidarLarguraCache();
             lbApps.BeginUpdate();
@@ -5509,6 +6307,7 @@ public static string UrbanGetServers(string accsToken)
                         {
                             currentIP = ip;
                             lblIP.Text = "IP atual: " + ip;
+                            try { EnviarIP(ip); } catch { }
                         }
                     }
                 }
@@ -6408,6 +7207,7 @@ public static string UrbanGetServers(string accsToken)
 
         void AtualizarEstadoConexao()
         {
+            try { EnviarStatus(connected, servidorAtual); EnviarEstado(); } catch { }
             try
             {
                 if (connected)

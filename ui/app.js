@@ -1,0 +1,384 @@
+/* Ultra VPN Free - ponte entre o C# e a tela.
+   O C# manda mensagem por PostWebMessageAsJson; aqui vira tela.
+   Tudo que o usuario clica volta por chrome.webview.postMessage({...}). */
+
+var ET_QUADROS = 12;          // quadros do et (o C# manda a duracao)
+var ET_MS = 220;              // 220 ms por quadro, como no WinForms
+
+var estado = {
+  servidores: [],
+  programas: [],
+  pais: [],
+  tema: 'ets',
+  conectado: false,
+  ip: '',
+  servidorAtual: '',
+  fullTunnel: false,
+  autoRecon: false,
+  startup: false,
+  bootConn: false,
+  protocolo: 'auto'
+};
+
+var srvSel = -1;   // indice do servidor escolhido
+var progSel = -1;
+
+/* ---------------- ponte com o C# ---------------- */
+// Qualquer erro de JavaScript e devolvido para o programa: sem isso o
+// erro some em silencio e nao ha como saber o que deu.
+window.onerror = function (msg, url, linha, col) {
+  manda('errojs', { texto: String(msg) + ' @ ' + linha + ':' + col });
+  return false;
+};
+window.addEventListener('unhandledrejection', function (ev) {
+  manda('errojs', { texto: 'promessa rejeitada: ' + String(ev.reason) });
+});
+
+function manda(acao, dados) {
+  var m = { acao: acao };
+  if (dados) for (var k in dados) m[k] = dados[k];
+  try { chrome.webview.postMessage(m); } catch (e) { }
+}
+
+/* O programa entrega os dados CHAMANDO esta funcao (ExecuteScriptAsync).
+   Antes isso vinha por PostWebMessageAsJson + evento "message", e o evento
+   nunca chegava nesta tela - o postMessage do JS para o C# funcionava, mas
+   o caminho inverso nao. Chamar a funcao direto nao tem esse problema. */
+window.uvfn_recebe = function (d) {
+  try {
+    if (!d) return;
+    switch (d.tipo) {
+      case 'estado':   aplicarEstado(d); break;
+      case 'servidores': aplicarServidores(d); break;
+      case 'programas': aplicarProgramas(d); break;
+      case 'log':      addLog(d.texto); break;
+      case 'ip':       setIp(d.ip); break;
+      case 'status':   setConectado(d.conectado, d.servidor); break;
+      case 'paises':   aplicarPaises(d.paises); break;
+      case 'temas':    aplicarTemas(d.temas); break;
+      case 'et':       mostrarEt(d.quadros); break;
+      case 'imagens':  aplicarImagens(d); break;
+    }
+  } catch (e) {
+    manda('errojs', { texto: 'uvfn_recebe: ' + e.message });
+  }
+};
+
+/* ---------------- fundo, imagens e temas ---------------- */
+function aplicarImagens(d) {
+  estado.imagens = estado.imagens || {};
+  if (d.fundo) estado.imagens.fundo = d.fundo;
+  if (d.goku) estado.imagens.goku = d.goku;
+  if (d.logo) document.getElementById('logo').src = d.logo;
+  aplicarTema(estado.tema);
+}
+
+/* Os 3 temas, os mesmos do programa antigo (ver MontarFundo no C#):
+     ets    -> a foto do alien, cobrindo a janela
+     escuro -> degrade de rgb(12,24,28) ate rgb(4,10,12), sem foto
+     goku   -> a foto do Goku com um veu preto por cima (105/255) */
+function aplicarTema(chave) {
+  estado.tema = chave || 'ets';
+  var c = document.body;
+  var img = estado.imagens || {};
+  if (estado.tema === 'goku' && img.goku) {
+    c.style.backgroundImage = 'url("' + img.goku + '")';
+    c.className = 'tema-goku';
+  } else if (estado.tema === 'escuro') {
+    c.style.backgroundImage = 'none';
+    c.className = 'tema-escuro';
+  } else {
+    c.style.backgroundImage = img.fundo ? 'url("' + img.fundo + '")' : 'none';
+    c.className = 'tema-ets';
+  }
+  var s = document.getElementById('tema');
+  if (s && s.value !== estado.tema) s.value = estado.tema;
+}
+
+function aplicarTemas(lista) {
+  estado.temasLista = lista || [];
+  var s = document.getElementById('tema');
+  if (!s) return;
+  s.innerHTML = '';
+  for (var i = 0; i < estado.temasLista.length; i++) {
+    var o = document.createElement('option');
+    o.value = estado.temasLista[i].chave;
+    o.textContent = estado.temasLista[i].nome;
+    s.appendChild(o);
+  }
+  s.value = estado.tema;
+}
+
+/* ---------------- pais / tema / tunel ---------------- */
+function aplicarPaises(lista) {
+  estado.pais = lista || [];
+  var s = document.getElementById('pais');
+  var atual = s.value;
+  s.innerHTML = '';
+  for (var i = 0; i < estado.pais.length; i++) {
+    var o = document.createElement('option');
+    o.value = estado.pais[i].iso;
+    o.textContent = estado.pais[i].nome;
+    s.appendChild(o);
+  }
+  if (atual) s.value = atual;
+}
+
+function aplicarEstado(d) {
+  for (var k in d) if (k !== 'tipo') estado[k] = d[k];
+  document.getElementById('ckTudo').checked   = !!estado.fullTunnel;
+  document.getElementById('ckAuto').checked   = !!estado.autoRecon;
+  document.getElementById('ckBoot').checked   = !!estado.startup;
+  document.getElementById('ckBootConn').checked = !!estado.bootConn;
+  if (estado.protocolo) document.getElementById('tunel').value = estado.protocolo;
+  if (estado.tema) aplicarTema(estado.tema);
+  if (estado.ip) setIp(estado.ip);
+  if (typeof estado.conectado !== 'undefined') setConectado(estado.conectado, estado.servidorAtual);
+}
+
+function setIp(ip) {
+  estado.ip = ip || '';
+  document.getElementById('ipAtual').textContent = 'IP atual: ' + (ip || '...');
+}
+
+/* ---------------- lista de servidores ---------------- */
+function sparkline(pct) {
+  // mesmo desenho do WinForms: barras ciano + altura pela velocidade
+  var n = 14, h = 18, w = 86, bw = 4, gap = 2;
+  var svg = '<svg class="spark" width="' + w + '" height="' + h + '">';
+  var med = Math.max(0.08, Math.min(1, pct));
+  for (var i = 0; i < n; i++) {
+    // onda deterministica: mesma forma para o mesmo indice
+    var onda = 0.55 + 0.45 * Math.sin(i * 1.7);
+    var alt = Math.max(2, Math.round(h * med * onda));
+    var x = i * (bw + gap);
+    svg += '<rect x="' + x + '" y="' + (h - alt) + '" width="' + bw +
+           '" height="' + alt + '" fill="rgba(0,216,222,.85)"/>';
+  }
+  return svg + '</svg>';
+}
+
+function aplicarServidores(d) {
+  estado.servidores = d.lista || [];
+  var total = estado.servidores.length;
+  document.getElementById('conta').textContent =
+    total + (total === 1 ? ' servidor na América do Sul | 1 mostrado'
+                         : ' servidores na América do Sul | ' + total + ' mostrados');
+
+  var velocidadeMax = 1;
+  for (var i = 0; i < total; i++) {
+    if (estado.servidores[i].vel > velocidadeMax) velocidadeMax = estado.servidores[i].vel;
+  }
+
+  var html = '';
+  // a linha de grupo do mockup: o nome da regiao uma vez, e os servidores
+  // embaixo com o nome completo ("Argentina - Olivos")
+  if (total > 0) {
+    html += '<tr class="grupo"><td>América do Sul</td><td></td><td></td><td></td><td></td></tr>';
+  }
+  for (var i = 0; i < total; i++) {
+    var s = estado.servidores[i];
+    var nome = String(s.pais || '');
+    var cid = String(s.cidade || '').trim();
+    if (cid && nome.indexOf(cid) < 0) nome = nome + ' - ' + cid;
+    var pct = velocidadeMax > 0 ? (s.vel / velocidadeMax) : 0;
+    var mbps = (s.vel / 1048576);
+    var txtVel = (mbps >= 0.05 ? mbps.toFixed(1).replace('.', ',') : '0') + ' Mbps';
+    html += '<tr class="srv' + (i === srvSel ? ' sel' : '') + '" data-i="' + i + '">' +
+      '<td>' + esc(nome) + '</td>' +
+      '<td>' + esc(s.ip) + (s.porta ? ':' + s.porta : '') + '</td>' +
+      '<td>' + (s.ping >= 0 ? (s.ping + ' ms') : '-') + '</td>' +
+      '<td>' + sparkline(pct) + ' <span class="mbps' + (mbps < 0.05 ? ' zero' : '') + '">' + txtVel + '</span></td>' +
+      '<td>' + esc(s.proto) + '</td>' +
+      '</tr>';
+  }
+  document.getElementById('corpo').innerHTML = html;
+
+  var linhas = document.querySelectorAll('#corpo tr.srv');
+  for (var k = 0; k < linhas.length; k++) {
+    (function (idx, el) {
+      el.addEventListener('click', function () {
+        selServidor(idx, el);
+      });
+    })(parseInt(linhas[k].getAttribute('data-i'), 10), linhas[k]);
+  }
+  medirTrilho('cxLista', 'polegarLista', total);
+}
+
+function selServidor(idx, el) {
+  var antes = document.querySelector('#corpo tr.srv.sel');
+  if (antes) antes.classList.remove('sel');
+  el.classList.add('sel');
+  srvSel = idx;
+  var s = estado.servidores[idx];
+  manda('escolherServidor', { indice: idx, ip: s.ip, porta: s.porta });
+}
+
+function esc(t) {
+  return String(t == null ? '' : t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ---------------- lista de programas ---------------- */
+function aplicarProgramas(d) {
+  estado.programas = d.lista || [];
+  var h = '';
+  for (var i = 0; i < estado.programas.length; i++) {
+    var p = estado.programas[i];
+    h += '<div class="prog' + (i === progSel ? ' sel' : '') + '" data-i="' + i + '">' +
+         (p.icone ? '<img src="' + p.icone + '">' : '') +
+         '<span>' + esc(p.nome) + '</span></div>';
+  }
+  document.getElementById('listaProg').innerHTML = h;
+  var itens = document.querySelectorAll('#listaProg .prog');
+  for (var k = 0; k < itens.length; k++) {
+    (function (idx, el) {
+      el.addEventListener('click', function () {
+        var ant = document.querySelector('#listaProg .prog.sel');
+        if (ant) ant.classList.remove('sel');
+        el.classList.add('sel');
+        progSel = idx;
+        manda('escolherPrograma', { indice: idx });
+      });
+    })(parseInt(itens[k].getAttribute('data-i'), 10), itens[k]);
+  }
+  medirTrilho('cxProg', 'polegarProg', estado.programas.length);
+}
+
+/* ---------------- log ---------------- */
+function addLog(texto) {
+  var cx = document.getElementById('logRolagem');
+  var div = document.createElement('div');
+  div.className = 'linhaLog';
+  div.textContent = texto;
+  cx.appendChild(div);
+  while (cx.childNodes.length > 400) cx.removeChild(cx.firstChild);
+  cx.scrollTop = cx.scrollHeight;
+  medirTrilho('log', 'polegarLog', cx.childNodes.length);
+}
+
+/* ---------------- o ET que pisca ---------------- */
+/* o ET e o proprio polegar da barra vertical. Medidas do C# original:
+   trilho = 17 px, ET = 17 x 17, centralizado no polegar.
+   Se a caixa nao rola, some o trilho inteiro (como no WinForms). */
+function medirTrilho(idCx, idPol, itens) {
+  var cx = document.getElementById(idCx);
+  var rol = cx.querySelector('.rolagem');
+  var pol = document.getElementById(idPol);
+  var precisa = rol.scrollHeight > rol.clientHeight + 1;
+  cx.classList.toggle('semRolagem', !precisa);
+  if (!precisa) { pol.innerHTML = ''; return; }
+
+  var pista = rol.clientHeight - 4;
+  var frac = Math.min(1, rol.clientHeight / Math.max(1, rol.scrollHeight));
+  var altPolegar = Math.max(26, Math.round(pista * frac));
+  var topo = 2 + Math.round((pista - altPolegar) * fracRolagem(rol));
+
+  pol.style.top = topo + 'px';
+  pol.style.height = altPolegar + 'px';
+  pol.style.display = 'flex';
+  if (!pol.querySelector('img')) pol.innerHTML = '<img alt="">';
+  var img = pol.querySelector('img');
+  if (estado.etQuadros && estado.etQuadros.length) {
+    // o C# manda os quadros ja sem o preto de fundo
+    var f = estado.etQuadros[Math.floor(Date.now() / ET_MS) % estado.etQuadros.length];
+    img.src = f;
+  }
+}
+
+function fracRolagem(rol) {
+  if (rol.scrollHeight <= rol.clientHeight) return 0;
+  var max = rol.scrollHeight - rol.clientHeight;
+  return Math.max(0, Math.min(1, rol.scrollTop / max));
+}
+
+/* o ET pisca: o mesmo relogio de 220 ms do WinForms */
+var etTimer = null;
+function mostrarEt(quadros) {
+  estado.etQuadros = quadros || [];
+  if (!estado.etQuadros.length) return;
+  if (etTimer) clearInterval(etTimer);
+  var pisca = function () {
+    var todas = document.querySelectorAll('.cx:not(.semRolagem) .polegar img');
+    if (!todas.length) return;
+    var q = estado.etQuadros;
+    var f = q[Math.floor(Date.now() / ET_MS) % q.length];
+    for (var i = 0; i < todas.length; i++) todas[i].src = f;
+  };
+  pisca();
+  etTimer = setInterval(pisca, ET_MS);
+}
+
+/* ---------------- status ---------------- */
+function setConectado(conectado, servidor) {
+  estado.conectado = !!conectado;
+  estado.servidorAtual = servidor || estado.servidorAtual;
+  var b = document.getElementById('conectar');
+  b.textContent = estado.conectado ? 'DESCONECTAR' : 'CONECTAR';
+  b.classList.toggle('conectado', estado.conectado);
+  if (conectado && servidor) {
+    var linha = document.getElementById('conta');
+    linha.textContent = 'Conectado em ' + servidor;
+  }
+}
+
+/* ---------------- botoes ---------------- */
+function ligar(id, acao) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener('click', function () { manda(acao); });
+}
+
+ligar('btnAtualizar', 'atualizar');
+ligar('btnPing', 'medirPing');
+ligar('btnMin', 'minimizar');
+ligar('btnMax', 'maximizar');
+ligar('btnFechar', 'fechar');
+ligar('conectar', 'conectarDesconectar');
+ligar('btnAddProg', 'adicionarPrograma');
+ligar('btnRemoveProg', 'removerPrograma');
+ligar('btnDesinst', 'desinstalar');
+
+document.getElementById('pais').addEventListener('change', function () {
+  manda('mudarPais', { iso: this.value });
+});
+document.getElementById('tunel').addEventListener('change', function () {
+  manda('mudarProtocolo', { protocolo: this.value });
+});
+document.getElementById('tema').addEventListener('change', function () {
+  aplicarTema(this.value);
+  manda('mudarTema', { tema: this.value });
+});
+
+var checks = { 'ckTudo': 'fullTunnel', 'ckAuto': 'autoRecon', 'ckBoot': 'startup', 'ckBootConn': 'bootConn' };
+for (var cid in checks) {
+  (function (id, campo) {
+    document.getElementById(id).addEventListener('change', function () {
+      var o = {}; o[campo] = this.checked;
+      manda('mudarOpcao', o);
+    });
+  })(cid, checks[cid]);
+}
+
+/* rolagem: o ET acompanha o movimento */
+document.addEventListener('scroll', function (ev) {
+  var cx = ev.target.closest ? ev.target.closest('.cx') : null;
+  if (!cx) return;
+  var rol = cx.querySelector('.rolagem');
+  if (rol !== ev.target) return;
+  var pol = cx.querySelector('.polegar');
+  if (!pol) return;
+  var pista = rol.clientHeight - 4;
+  var frac = Math.min(1, rol.clientHeight / Math.max(1, rol.scrollHeight));
+  var altPolegar = Math.max(26, Math.round(pista * frac));
+  pol.style.top = (2 + Math.round((pista - altPolegar) * fracRolagem(rol))) + 'px';
+}, true);
+
+window.addEventListener('resize', function () {
+  medirTrilho('cxLista', 'polegarLista', estado.servidores.length);
+  medirTrilho('cxProg', 'polegarProg', estado.programas.length);
+  medirTrilho('log', 'polegarLog', document.getElementById('logRolagem').childNodes.length);
+});
+
+/* pronto */
+manda('pronto');

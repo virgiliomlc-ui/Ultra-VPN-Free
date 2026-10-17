@@ -1,0 +1,188 @@
+/* Ultra VPN Free - tela (WebView2)
+   Este arquivo e o MESMO CSS do mockup aprovado, linha por linha.
+   As unicas diferencas estao marcadas com "SO AQUI" e sao:
+     - a barra de titulo some (a janela do Windows ja tem a sua)
+     - os ids do HTML (#cxProg, #log, etc.) no lugar das classes do mockup
+     - os 3 temas (ets / escuro / goku), que o programa sempre teve
+   Qualquer mudanca de cor, fonte ou tamanho tem que ser feita nos dois
+   arquivos ao mesmo tempo, senao a tela real sai diferente do desenho. */
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html, body { width:100%; height:100%; overflow:hidden; background:#0b0e10; }
+body {
+  display:flex; align-items:center; justify-content:center;
+  font-family:"Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+/* ---------------- a janela ----------------
+   O mockup desenhava a janela de 917 x 756 centralizada com sombra,
+   dentro de uma pagina escura. Aqui quem centraliza e a janela do
+   Windows (ela ja nasce em CenterScreen com este tamanho); por isso o
+   html/body enchem a tela toda e a borda arredondada some - fora dela
+   fica a barra de titulo nativa, e nao o desenho. */
+#janela {
+  width:100%; height:100%;
+  display:flex; flex-direction:column;
+  overflow:hidden;
+  background:#05080a url('fundo.alien.jpg') center center/cover no-repeat;
+  color:#e8f4f8; font-size:13px;
+}
+
+/* ---------------- temas (SO AQUI) ----------------
+   escuro = degrade rgb(12,24,28) -> rgb(4,10,12) sem foto
+   goku   = a foto do Goku com um veu preto 105/255 por cima (o mesmo
+            alfa que o MontarFundo do C# usa) */
+body.tema-escuro {
+  background-image: none;
+  background: linear-gradient(180deg, #0c181c 0%, #040a0c 100%);
+}
+body.tema-goku { background-image: none; background-color:#000; }
+body.tema-goku::before {
+  content:""; position:fixed; inset:0; z-index:-1;
+  background-repeat:no-repeat; background-size:cover; background-position:center;
+}
+body.tema-goku::after {
+  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:rgba(0,0,0,.41);
+}
+
+/* ---------- cabecalho ---------- */
+#cabecalho { display:flex; align-items:flex-start; gap:14px; padding:10px 18px 0; flex:0 0 auto; }
+#logo {
+  width:96px; height:82px; border:1.5px solid rgba(0,216,222,.5);
+  border-radius:2px; object-fit:cover; background:#0a0f12;
+}
+#marca { flex:1; padding-top:1px; }
+#marca h1 {
+  font-size:30px; font-weight:300; letter-spacing:2.5px; color:#4ee6ea;
+  text-shadow:0 0 16px rgba(0,216,222,.85), 0 0 38px rgba(0,216,222,.45);
+}
+#marca p { margin-top:2px; font-size:13px; color:#9fd4dd; }
+#dirTopo { text-align:right; }
+#dirTopo .linha { display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-bottom:7px; }
+#dirTopo label { color:#bcd8de; }
+#dirTopo #ipAtual { color:#4ee6ea; font-weight:600; }
+
+/* ---------- controles ---------- */
+.sel, .btn {
+  background:rgba(6,22,26,.88); color:#4ee6ea;
+  border:1.3px solid rgba(0,216,222,.42); border-radius:2px;
+  padding:5px 9px; font-size:13px; font-family:inherit;
+}
+.sel { min-width:210px; }
+.sel option { background:#0a1418; color:#4ee6ea; }
+.btn { cursor:pointer; }
+.btn:hover { background:rgba(0,60,68,.92); border-color:#4ee6ea; }
+#barraCtrl { display:flex; align-items:center; gap:10px; padding:6px 18px 0; flex:0 0 auto; }
+#barraCtrl .rot { color:#bcd8de; }
+#conta { text-align:right; color:#4ee6ea; padding:3px 18px 0; flex:0 0 auto; }
+
+/* ==================================================================
+   BARRA VERTICAL COM O ET QUE PISCA
+   componente unico: toda caixa com rolagem vertical usa este bloco.
+   medidas do C# (DesenharBarraRolagem):
+     trilho  = SM_CXVSCROLL = 17 px de largura
+     polegar = max(26, trilho_alto * fracao_visivel), transparente
+     et      = 17 x 17, quadrado, CENTRADO dentro do polegar
+     quadros = os 12 do tray.gif, 220 ms
+   ================================================================== */
+.cx { position:relative; }
+.cx .rolagem { height:100%; overflow-y:auto; padding-right:17px; }
+.cx .rolagem::-webkit-scrollbar { display:none; }
+.cx .rolagem { scrollbar-width:none; -ms-overflow-style:none; }
+
+.cx .trilho {
+  position:absolute; right:0; top:0; bottom:0; width:17px;
+  background:transparent; pointer-events:none;
+}
+/* o polegar NAO se ve: o proprio ET e a barra. So um espacador para
+   o quadrado de 17x17 ficar na altura certa dentro do trilho. */
+.cx .polegar {
+  position:absolute; left:0; right:0;
+  background:transparent; border:none; border-radius:0;
+  display:flex; align-items:center; justify-content:center;
+}
+/* o et: 17x17, fundo transparente (como o SemPretoDeFundo do C# faz),
+   e ele sozinho ocupa o trilho inteiro. mix-blend-mode: screen
+   reproduz o mesmo efeito do preto do GIF sumir. */
+.cx .polegar img {
+  width:17px; height:17px; object-fit:cover; display:block;
+  background:transparent; border-radius:0; box-shadow:none;
+  mix-blend-mode:screen;
+}
+/* caixa que NAO rola: nada de trilho (igual o programa de hoje) */
+.cx.semRolagem .trilho { display:none; }
+
+table { width:100%; border-collapse:collapse; }
+thead th {
+  position:sticky; top:0; text-align:left; padding:7px 8px;
+  background:rgba(10,30,36,.95); color:#4ee6ea; font-weight:600;
+  border-bottom:1.3px solid rgba(0,216,222,.35);
+}
+tbody td {
+  padding:4px 8px; border-bottom:1px solid rgba(0,216,222,.13);
+  color:#dff2f6; white-space:nowrap;
+}
+tbody tr.srv { cursor:pointer; }
+tbody tr.srv:hover td { background:rgba(0,216,222,.10); }
+tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
+.grupo td { color:#7fe9ee; font-weight:700; font-size:14px; padding-top:6px; }
+.spark { width:86px; height:18px; vertical-align:middle; }
+.mbps { color:#57ff8f; }
+.mbps.zero { color:#6f8b93; }
+
+/* ---------- programas ---------- */
+#rotProgramas { padding:7px 18px 2px; color:#9fd4dd; flex:0 0 auto; }
+#gradeBaixo { display:flex; gap:16px; padding:2px 18px 0; flex:0 0 auto; height:118px; }
+#cxProg {
+  flex:1; background:rgba(4,16,20,.45);
+  border:1px solid rgba(0,216,222,.28); border-radius:2px;
+}
+#cxProg .rolagem { padding:5px 17px 5px 5px; }
+.prog { display:flex; align-items:center; gap:9px; padding:3px 6px; border-radius:3px; cursor:pointer; }
+.prog:hover { background:rgba(0,216,222,.10); }
+.prog.sel { background:rgba(0,216,222,.17); }
+.prog img { width:24px; height:24px; border-radius:3px; object-fit:cover; background:#000; }
+.prog span { font-size:14px; }
+
+#colDir { flex:0 0 300px; display:flex; flex-direction:column; gap:5px; }
+.btnLar { color:#ffb703; border-color:rgba(255,183,3,.55); }
+.btnLar:hover { background:rgba(255,183,3,.16); border-color:#ffb703; }
+.check { display:flex; align-items:center; gap:8px; color:#dff2f6; white-space:nowrap; cursor:pointer; }
+.check input { width:15px; height:15px; accent-color:#00d8de; flex:0 0 auto; cursor:pointer; }
+
+/* ---------- CONECTAR ---------- */
+#linhaConectar { display:flex; align-items:center; gap:16px; padding:9px 18px 0; flex:0 0 auto; }
+#conectar {
+  flex:0 0 374px; height:52px; text-align:center; line-height:46px;
+  font-size:20px; letter-spacing:2px; color:#57ff8f; cursor:pointer;
+  border:2.2px solid rgba(0,255,120,.62); border-radius:2px;
+  background:rgba(0,60,26,.40);
+  text-shadow:0 0 12px rgba(0,255,120,.75);
+}
+#conectar:hover { background:rgba(0,92,40,.55); border-color:#57ff8f; }
+#conectar.conectado {
+  color:#ff7b7b; border-color:rgba(255,90,90,.62); background:rgba(70,0,0,.40);
+  text-shadow:0 0 12px rgba(255,90,90,.7);
+}
+#checksMeio { flex:1; display:flex; flex-direction:column; gap:7px; }
+#btnDesinst {
+  flex:0 0 214px; height:40px; text-align:center; line-height:34px;
+  color:#ffb703; cursor:pointer;
+  border:1.3px solid rgba(255,183,3,.55); border-radius:2px;
+  background:rgba(6,22,26,.88);
+}
+#btnDesinst:hover { background:rgba(255,183,3,.16); border-color:#ffb703; }
+
+/* ---------- log ---------- */
+#rotLog { padding:8px 18px 2px; color:#bcd8de; flex:0 0 auto; }
+#log {
+  margin:2px 18px 12px; padding:8px; flex:0 0 74px;
+  background:rgba(2,10,13,.55); border:1px solid rgba(0,216,222,.22);
+  border-radius:2px; color:#cfe6ec; font-size:12px; line-height:1.42;
+  font-family:Consolas,"Courier New",monospace;
+  user-select:text;
+}
+#log .rolagem { padding:0 17px 0 0; }
+.linhaLog { white-space:pre-wrap; word-break:break-all; }

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Ultra VPN Free</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="janela">
+
+  <!-- Sem barra de titulo aqui: a janela do Windows ja tem a sua, logo acima.
+       Com a barra dentro da tela ficavam duas empilhadas. -->
+
+  <div id="cabecalho">
+    <img id="logo" src="alien.escuro.png">
+    <div id="marca">
+      <h1>ULTRA VPN FREE</h1>
+      <p>VPN grátis da América do Sul - só os programas que você escolher passam pela VPN</p>
+    </div>
+    <div id="dirTopo">
+      <div class="linha">
+        <label for="tema">Temas:</label>
+        <select class="sel" id="tema" style="min-width:186px">
+          <option value="ets">Tema Dos ETS</option>
+          <option value="escuro">Tema Escuro</option>
+          <option value="goku">Goku Instinto Superior</option>
+        </select>
+      </div>
+      <div id="ipAtual">IP atual: carregando...</div>
+    </div>
+  </div>
+
+  <div id="barraCtrl">
+    <span class="rot">País:</span>
+    <select class="sel" id="pais"></select>
+    <button class="btn" id="btnAtualizar">Atualizar</button>
+    <button class="btn" id="btnPing">Medir ping</button>
+    <span class="rot" style="margin-left:34px">Túnel:</span>
+    <select class="sel" id="tunel" style="min-width:206px">
+      <option value="auto">UDP e TCP (automático)</option>
+      <option value="udp">Só UDP</option>
+      <option value="tcp">Só TCP</option>
+    </select>
+  </div>
+  <div id="conta">carregando servidores...</div>
+
+  <div class="cx" id="cxLista" style="flex:1 1 auto; min-height:0; margin:4px 18px 0;">
+    <div class="rolagem" id="lista">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:23%">País</th>
+            <th style="width:22%">IP</th>
+            <th style="width:12%">Seu ping</th>
+            <th style="width:27%">Velocidade</th>
+            <th style="width:16%">Protocolo</th>
+          </tr>
+        </thead>
+        <tbody id="corpo"></tbody>
+      </table>
+    </div>
+    <div class="trilho"><div class="polegar" id="polegarLista"></div></div>
+  </div>
+
+  <div id="rotProgramas">Programas que passam pela VPN (o resto do PC fica na sua conexão normal):</div>
+
+  <div id="gradeBaixo">
+    <div class="cx" id="cxProg">
+      <div class="rolagem" id="listaProg"></div>
+      <div class="trilho"><div class="polegar" id="polegarProg"></div></div>
+    </div>
+    <div id="colDir">
+      <button class="btn" id="btnAddProg">Adicionar programa...</button>
+      <button class="btn btnLar" id="btnRemoveProg">Remover</button>
+      <label class="check"><input type="checkbox" id="ckTudo"><span>Tudo pela VPN (marque = PC inteiro)</span></label>
+      <label class="check"><input type="checkbox" id="ckAuto"><span>Autoconnectar se a VPN cair</span></label>
+    </div>
+  </div>
+
+  <div id="linhaConectar">
+    <div id="conectar">CONECTAR</div>
+    <div id="checksMeio">
+      <label class="check"><input type="checkbox" id="ckBoot"><span>Iniciar com o Windows</span></label>
+      <label class="check"><input type="checkbox" id="ckBootConn"><span>Conectar ao iniciar com o Windows</span></label>
+    </div>
+    <div id="btnDesinst">Desinstalar o programa</div>
+  </div>
+
+  <div id="rotLog">O que está conectado:</div>
+  <div class="cx" id="log">
+    <div class="rolagem" id="logRolagem"></div>
+    <div class="trilho"><div class="polegar" id="polegarLog"></div></div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
