@@ -85,21 +85,31 @@ namespace UltraVPN
         {
             try
             {
-                string dir = Dir();
-                Extrair("wv2.Core.dll", Path.Combine(dir, "Microsoft.Web.WebView2.Core.dll"));
-                Extrair("wv2.WinForms.dll", Path.Combine(dir, "Microsoft.Web.WebView2.WinForms.dll"));
-
+                // As duas DLLs gerenciadas do WebView2 carregam DIRETO DA
+                // MEMORIA, sem extrair arquivo nenhum na pasta da tela. Com
+                // LoadFrom o CLR mantinha os .dll travados ate o processo
+                // sair - e a desinstalacao nunca conseguia apagar a pasta
+                // web. Da memoria, nada fica travado e nada sobra.
                 AppDomain.CurrentDomain.AssemblyResolve += delegate (object s, ResolveEventArgs a)
                 {
                     try
                     {
                         var nome = new System.Reflection.AssemblyName(a.Name).Name;
                         if (nome == null) return null;
-                        if (nome != "Microsoft.Web.WebView2.Core" &&
-                            nome != "Microsoft.Web.WebView2.WinForms") return null;
-                        var arquivo = Path.Combine(dir, nome + ".dll");
-                        if (!File.Exists(arquivo)) return null;
-                        return System.Reflection.Assembly.LoadFrom(arquivo);
+                        string recurso = null;
+                        if (nome == "Microsoft.Web.WebView2.Core") recurso = "wv2.Core.dll";
+                        if (nome == "Microsoft.Web.WebView2.WinForms") recurso = "wv2.WinForms.dll";
+                        if (recurso == null) return null;
+                        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                        using (var rs = asm.GetManifestResourceStream(recurso))
+                        {
+                            if (rs == null) return null;
+                            using (var ms = new MemoryStream())
+                            {
+                                rs.CopyTo(ms);
+                                return System.Reflection.Assembly.Load(ms.ToArray());
+                            }
+                        }
                     }
                     catch { return null; }
                 };
@@ -168,26 +178,37 @@ namespace UltraVPN
                     try
                     {
                         if (alvo.InvokeRequired)
-                            alvo.BeginInvoke((Action)delegate
-                            {
-                                try { alvo.Dispose(); } catch { }
-                                try { if (modLoader != IntPtr.Zero) FreeLibrary(modLoader); } catch { }
-                                modLoader = IntPtr.Zero;
-                            });
+                            alvo.BeginInvoke((Action)delegate { SoltarNavegador(alvo); });
                         else
-                        {
-                            alvo.Dispose();
-                            try { if (modLoader != IntPtr.Zero) FreeLibrary(modLoader); } catch { }
-                            modLoader = IntPtr.Zero;
-                        }
+                            SoltarNavegador(alvo);
                     }
-                    catch { }
+                    catch { try { SoltarNavegador(alvo); } catch { } }
                 }
             }
             catch { }
             wv = null;
             cw = null;
             pronto = false;
+        }
+
+        static void SoltarNavegador(WebView2 alvo)
+        {
+            try { alvo.Dispose(); } catch { }
+            try
+            {
+                // O CLR e os P/Invoke podem ter subido a contagem de
+                // referencias da WebView2Loader mais de uma vez: solte ate o
+                // modulo sair de vez do processo (FreeLibrary devolve false
+                // quando o handle ja nao vale mais).
+                for (int i = 0; i < 16 && modLoader != IntPtr.Zero; i++)
+                {
+                    bool ok = false;
+                    try { ok = FreeLibrary(modLoader); } catch { break; }
+                    if (!ok) break;
+                }
+            }
+            catch { }
+            modLoader = IntPtr.Zero;
         }
 
         // ---------------------------------------------------------------
@@ -9741,6 +9762,39 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 resumo += "\n\nNao deu para remover:\n- " + String.Join("\n- ", sobrou.ToArray());
             resumo += "\n\nO UltraVPNFree.exe foi mantido onde esta.";
             MessageBox.Show(this, resumo, "Desinstalar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // rede de seguranca final: um filho espera este processo SAIR e
+            // entao apaga as pastas de vez. Se qualquer arquivo ainda estava
+            // travado (o navegador demora um instante para morrer, o CLR
+            // segura o que carregou ate o fim), ele sai junto com o programa
+            // e o filho apaga tudo logo a seguir. Os caminhos vêm de
+            // LOCALAPPDATA/TEMP: em outro PC segue o usuario logado.
+            try
+            {
+                var bye = Path.Combine(Path.GetTempPath(), "uvpn_limpeza.cmd");
+                var pid = Process.GetCurrentProcess().Id;
+                var raizDados = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                var texto =
+                    "@echo off\r\n" +
+                    "setlocal EnableDelayedExpansion\r\n" +
+                    "set /a n=0\r\n" +
+                    ":espera\r\n" +
+                    "timeout /t 1 /nobreak >nul\r\n" +
+                    "tasklist /FI \"PID eq " + pid + "\" | find \" " + pid + " \" >nul\r\n" +
+                    "if not errorlevel 1 set /a n+=1\r\n" +
+                    "if !n! LSS 60 if not errorlevel 1 goto espera\r\n" +
+                    "rd /s /q \"" + Path.Combine(raizDados, "Ultra VPN Free") + "\"\r\n" +
+                    "rd /s /q \"" + Path.Combine(Path.GetTempPath(), "Ultra VPN Free") + "\"\r\n" +
+                    "(goto) 2>nul & del \"" + bye + "\"\r\n";
+                File.WriteAllText(bye, texto, Encoding.ASCII);
+                Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + bye + "\"")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+            }
+            catch { }
+
             Application.Exit();
         }
 
