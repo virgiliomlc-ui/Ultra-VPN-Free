@@ -151,6 +151,46 @@ namespace UltraVPN
         }
 
         // ---------------------------------------------------------------
+        //  FECHAR O NAVEGADOR (solta os arquivos da pasta da tela)
+        // ---------------------------------------------------------------
+        //  O processo do navegador (msedgewebview2) e a propria
+        //  WebView2Loader.dll ficam com arquivos ABERTOS dentro da pasta
+        //  web\dados. Sem solta-los, a desinstalacao apaga tudo e a pasta
+        //  web sobra para tras. A desinstalacao chama isto ANTES de
+        //  apagar as pastas.
+        public static void FecharBrowser()
+        {
+            try
+            {
+                var alvo = wv;
+                if (alvo != null)
+                {
+                    try
+                    {
+                        if (alvo.InvokeRequired)
+                            alvo.BeginInvoke((Action)delegate
+                            {
+                                try { alvo.Dispose(); } catch { }
+                                try { if (modLoader != IntPtr.Zero) FreeLibrary(modLoader); } catch { }
+                                modLoader = IntPtr.Zero;
+                            });
+                        else
+                        {
+                            alvo.Dispose();
+                            try { if (modLoader != IntPtr.Zero) FreeLibrary(modLoader); } catch { }
+                            modLoader = IntPtr.Zero;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            wv = null;
+            cw = null;
+            pronto = false;
+        }
+
+        // ---------------------------------------------------------------
         //  EXTRAIR um recurso embutido para a pasta da tela
         // ---------------------------------------------------------------
         static bool ExtrairRecurso(string recurso, string destino)
@@ -9619,10 +9659,39 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             catch { sobrou.Add("alguma chave de registro ficou"); }
 
             // ---- 7) pastas de dados e temporarios ----
+            // O navegador da tela (WebView2) guarda arquivos abertos dentro de
+            // web\dados, e o proprio .exe carrega a WebView2Loader.dll de
+            // dentro da pasta web. Feche os dois ANTES de apagar, senao a
+            // pasta web sobra para tras. Tudo por variavel de ambiente
+            // (LOCALAPPDATA / TEMP): em outro PC apaga na pasta do usuario
+            // que estiver logado, sem nome fixo.
+            try { TelaWeb.FecharBrowser(); } catch { }
+            try { Thread.Sleep(1000); } catch { }
             try
             {
+                // a pasta da tela: ...\Ultra VPN Free\web (com os dados do
+                // navegador dentro). Tenta algumas vezes: o processo do
+                // navegador pode levar um instante para soltar os arquivos.
+                var web = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Ultra VPN Free", "web");
+                for (int i = 0; i < 4 && Directory.Exists(web); i++)
+                {
+                    try { Directory.Delete(web, true); } catch { }
+                    if (Directory.Exists(web)) Thread.Sleep(700);
+                }
+                if (Directory.Exists(web)) sobrou.Add("pasta da tela (web): " + web);
+
                 if (Directory.Exists(Store.DirDados)) Directory.Delete(Store.DirDados, true);
-                if (Directory.Exists(Store.TempDir)) Directory.Delete(Store.TempDir, true);
+                if (Directory.Exists(Store.DirDados)) sobrou.Add("pasta de dados: " + Store.DirDados);
+
+                // %TEMP%\Ultra VPN Free - tambem segue o usuario logado
+                for (int i = 0; i < 3 && Directory.Exists(Store.TempDir); i++)
+                {
+                    try { Directory.Delete(Store.TempDir, true); } catch { }
+                    if (Directory.Exists(Store.TempDir)) Thread.Sleep(500);
+                }
+                if (Directory.Exists(Store.TempDir)) sobrou.Add("pasta temporaria: " + Store.TempDir);
                 // o MSI que o .exe extrai para instalar o OpenVPN. Depois da
                 // instalacao ele ja e apagado, mas se a instalacao falhar no
                 // meio ele fica orfao em %TEMP%.
