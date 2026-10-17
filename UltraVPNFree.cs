@@ -7146,7 +7146,6 @@ Bitmap MontarFundoCover()
                     penteTimer.Start();
                 }
                 catch { try { RevalidarFontes(); } catch { } }
-                Log("Abrindo com a lista salva - em instantes atualizo ip, porta e .ovpn de todas as fontes.");
 
                 if (Program.TrayStart)
                 {
