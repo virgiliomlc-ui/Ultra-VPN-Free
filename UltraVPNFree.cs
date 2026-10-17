@@ -335,7 +335,19 @@ namespace UltraVPN
                 if (!CarregarLoader()) return;
                 if (!ExtrairTela()) return;
                 var opts = new CoreWebView2EnvironmentOptions();
-                opts.AdditionalBrowserArguments = "--disable-lcd-text";
+                opts.AdditionalBrowserArguments =
+                    "--disable-lcd-text " +
+                    // o Chromium congela o renderizador que nao esta na frente
+                    // (para economizar memoria) e leva uns 2 s para acorda-lo a
+                    // cada navegacao. Foi medido: a tela ficava pronta em
+                    // 3,2 s e o documento inteiro levava 5 ms - os 2 s eram
+                    // so a espera do navegador acordar. A janela deste
+                    // programa nao temcomo ficar escondida, entao nao ha
+                    // o que economizar aqui.
+                    "--disable-backgrounding-occluded-windows " +
+                    "--disable-renderer-backgrounding " +
+                    "--disable-background-timer-throttling " +
+                    "--disable-features=CalculateNativeWinOcclusion";
                 var dados = Path.Combine(Pasta(), "dados");
                 try { if (!Directory.Exists(dados)) Directory.CreateDirectory(dados); } catch { }
                 // comeca agora e fica guardando: a janela usa o mesmo
@@ -434,6 +446,7 @@ namespace UltraVPN
                             "uvpn.local", Pasta(),
                             CoreWebView2HostResourceAccessKind.DenyCors);
 
+                        // TEMP: mede quanto custa uma segunda navegacao
                         core.WebMessageReceived += delegate (object s, CoreWebView2WebMessageReceivedEventArgs e)
                         {
                             try { Receber(e.WebMessageAsJson); }
@@ -444,6 +457,9 @@ namespace UltraVPN
                         {
                             if (!e.IsSuccess) return;
                             pronto = true;
+                            // a janela so aparece quando a tela ja esta
+                            // inteira: ver LiberarJanela()
+                            if (dono != null) try { dono.LiberarJanela(); } catch { }
                             try { web.Focus(); } catch { }
                             Mandar("imagens", new Dictionary<string, object> {
                                 { "fundo", "https://uvpn.local/fundo.alien.jpg" },
@@ -3687,13 +3703,11 @@ public static string UrbanGetServers(string accsToken)
                 // �cone); o que muda � que o miolo vira HTML. Se o WebView2
                 // n�o entrar (PC sem o Runtime), o desenho antigo continua.
                 // ============================================================
-                telaWeb = false;
-                try { telaWeb = TelaWeb.Ligar(this, this); }
-                catch { telaWeb = false; }
-                // o Ligar pode falhar logo no comeco (sem Runtime, sem handle)
-                // e nesse caso o TelaWebFalhou nem chega a ser chamado: o
-                // fundo do WinForms precisa ser montado na mao aqui
-                if (!telaWeb) { try { AplicarTema(); } catch { } }
+                // A tela em WebView2 ja foi ligando em LigarTela(), no construtor,
+                // porque a janela so aparece depois que a tela esta pronta.
+                // Aqui so o plano B: se o LigarTela nem chegou a rodar.
+                telaWeb = telaWeb;
+                if (!telaTentada) { try { AplicarTema(); } catch { } LiberarJanela(); }
             };
 
             // ---------------- timers ----------------
@@ -3832,6 +3846,69 @@ public static string UrbanGetServers(string accsToken)
             catch (Exception e) { TelaWeb.Rastro("TelaPronta erro: " + e.Message); }
         }
 
+        // ---------------------------------------------------------------
+        //  A JANELA SO APARECE COM A TELA PRONTA
+        // ---------------------------------------------------------------
+        //  Medido nesta maquina: o WebView2 leva ~2 s entre pedir a pagina e
+        //  o documento comecar a rodar - e o mesmo para uma pagina de 35
+        //  bytes, entao nao e o nosso HTML nem a nossa imagem, e o navegador
+        //  subindo o renderizador. Mostrar a janela em 0,5 s deixava o
+        //  usuario olhando para um fundo vazio por 2 s e so depois aparecia
+        //  o programa. Agora a janela aparece uma unica vez, ja completa:
+        //  o que se ve e o programa inteiro, sem janela morta no meio.
+        bool janelaLiberada = false;
+        bool telaTentada = false;
+
+        // Liga a tela em HTML ASSIM QUE a janela tem handle - antes do Load e
+        // sem esperar a janela aparecer. Medido: o WebView2 leva ~2 s entre
+        // pedir a pagina e o documento comecar a rodar (o mesmo numa pagina
+        // de 35 bytes, entao nao e o nosso HTML). Se a janela so aparecesse
+        // junto, esses 2 s seriam de janela parada na tela. Ligando aqui, os
+        // 2 s rodam enquanto o Windows faz o resto e a janela aparece uma
+        // vez so, ja com o programa inteiro.
+        void LigarTela()
+        {
+            try
+            {
+                if (telaTentada) return;
+                telaTentada = true;
+                // CreateControl() NAO cria o handle de uma janela invisivel;
+                // e preciso de CreateHandle() para ter a janela de verdade
+                // antes de mostrar (o WebView2 exige uma janela de verdade)
+                if (!IsHandleCreated) CreateHandle();
+                if (!IsHandleCreated) { base.SetVisibleCore(true); return; }
+                telaWeb = TelaWeb.Ligar(this, this);
+                if (!telaWeb) { try { AplicarTema(); } catch { } LiberarJanela(); }
+            }
+            catch (Exception ex) { try { Log("Falha ao ligar a tela: " + ex.Message); } catch { } telaWeb = false; LiberarJanela(); }
+        }
+
+        protected override void SetVisibleCore(bool value)
+        {
+            // segura a janela ate a tela ficar pronta: nao faz sentido
+            // mostrar 2 s de janela vazia. O Load continua disparando por
+            // causa do CreateControl() acima.
+            if (value && !janelaLiberada)
+            {
+                LigarTela();
+                base.SetVisibleCore(false);
+                return;
+            }
+            base.SetVisibleCore(value);
+        }
+
+        public void LiberarJanela()
+        {
+            try
+            {
+                if (janelaLiberada) return;
+                janelaLiberada = true;
+                if (IsHandleCreated) BeginInvoke((Action)(delegate { try { Show(); } catch { } }));
+                else Show();
+            }
+            catch { }
+        }
+
         // janela de reserva onde os controles do WinForms ficam escondidos
         Form baia = null;
 
@@ -3847,6 +3924,7 @@ public static string UrbanGetServers(string accsToken)
                 // o fundo do Windows so e montado aqui (no plano B): com a
                 // tela web ele nao roda, porque quem pinta o fundo e o HTML
                 try { AplicarTema(); } catch { }
+                LiberarJanela();
                 Log("O Runtime do WebView2 nao esta neste PC - a tela antiga continua valendo.");
             }
             catch { }
