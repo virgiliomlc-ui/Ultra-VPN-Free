@@ -9473,22 +9473,129 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             return map;
         }
 
+        // ---------------------------------------------------------------
+        //  PROGRAMAS INSTALADOS, como a lista "Programas e Recursos"
+        // ---------------------------------------------------------------
+        //  Cada entrada das chaves Uninstall do Windows vira um item com o
+        //  NOME BONITO (DisplayName) e o executavel de verdade atras:
+        //  o DisplayIcon aponta pro .exe ("C:\...\x.exe,0"); sem ele, pega
+        //  o maior .exe da pasta de instalacao (desinstaladores fora).
+        List<string[]> ProgramasInstalados()
+        {
+            var res = new List<string[]>();      // [nome, caminho do .exe]
+            var exeVistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nomeVistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var raizes = new[] {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" };
+            foreach (var hive in new[] { Microsoft.Win32.Registry.LocalMachine,
+                                         Microsoft.Win32.Registry.CurrentUser })
+                foreach (var raiz in raizes)
+                {
+                    var k = hive.OpenSubKey(raiz);
+                    if (k == null) continue;
+                    foreach (var sub in k.GetSubKeyNames())
+                    {
+                        var s = k.OpenSubKey(sub);
+                        if (s == null) continue;
+                        try
+                        {
+                            var nome = Convert.ToString(s.GetValue("DisplayName") ?? "").Trim();
+                            if (nome == "" || nome.StartsWith("KB", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (nome.StartsWith("Security Update", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (nome.StartsWith("Atualiza\u00e7\u00e3o", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (nome.StartsWith("Update for", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (nome.IndexOf("Redistributable", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                            if (nome.StartsWith("Microsoft Edge", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (nomeVistos.Contains(nome)) continue;
+                            var disp = Convert.ToString(s.GetValue("DisplayIcon") ?? "").Trim();
+                            var loc = Convert.ToString(s.GetValue("InstallLocation") ?? "").Trim();
+                            var exe = ExeDeProgramaInstalado(disp, loc);
+                            if (String.IsNullOrEmpty(exe) || !File.Exists(exe)) continue;
+                            if (String.Equals(exe, Store.ExePath, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!exeVistos.Add(exe)) continue;
+                            nomeVistos.Add(nome);
+                            res.Add(new[] { nome, exe });
+                        }
+                        catch { }
+                        finally { try { s.Close(); } catch { } }
+                    }
+                    try { k.Close(); } catch { }
+                }
+            return res;
+        }
+
+        // Do "Programas e Recursos" para o .exe de verdade
+        string ExeDeProgramaInstalado(string displayIcon, string installLocation)
+        {
+            try
+            {
+                if (!String.IsNullOrEmpty(displayIcon))
+                {
+                    var p = displayIcon;
+                    int vir = p.IndexOf(',');
+                    if (vir > 0) p = p.Substring(0, vir);
+                    p = p.Trim().Trim('"').Trim();
+                    if (p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(p)) return p;
+                }
+                if (String.IsNullOrEmpty(installLocation) || !Directory.Exists(installLocation)) return null;
+                FileInfo melhor = null;
+                Action<string> olhar = delegate (string pasta)
+                {
+                    try
+                    {
+                        foreach (var f in Directory.GetFiles(pasta, "*.exe"))
+                        {
+                            var fn = Path.GetFileName(f);
+                            if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) continue;
+                            var fi = new FileInfo(f);
+                            if (melhor == null || fi.Length > melhor.Length) melhor = fi;
+                        }
+                    }
+                    catch { }
+                };
+                olhar(installLocation);
+                if (melhor == null)
+                    try
+                    {
+                        foreach (var sub in Directory.GetDirectories(installLocation))
+                        {
+                            olhar(sub);
+                            if (melhor != null) break;
+                        }
+                    }
+                    catch { }
+                return melhor == null ? null : melhor.FullName;
+            }
+            catch { return null; }
+        }
+
         string EscolherPrograma()
         {
-            var cands = Candidatos();
-            var items = cands.Keys
-                .Where(p =>
-                {
-                    var fn = Path.GetFileName(p) ?? "";
-                    if (String.Equals(p, Store.ExePath, StringComparison.OrdinalIgnoreCase)) return false;
-                    if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) return false;
-                    if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) return false;
-                    if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) return false;
-                    return true;
-                })
-                .OrderBy(p => cands[p], StringComparer.OrdinalIgnoreCase)
-                .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .Take(500)
+            // 1) programas INSTALADOS - a lista do "Programas e Recursos"
+            var lista = ProgramasInstalados();
+            var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in lista) usados.Add(p[1]);
+
+            // 2) + os .exe achados nas pastas de programas (Steam, Discord,
+            //    jogos e apps sem entrada propria) e os abertos agora
+            foreach (var kv in Candidatos())
+            {
+                if (usados.Contains(kv.Key)) continue;
+                var fn = Path.GetFileName(kv.Key) ?? "";
+                if (String.Equals(kv.Key, Store.ExePath, StringComparison.OrdinalIgnoreCase)) continue;
+                if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) continue;
+                if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) continue;
+                if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) continue;
+                usados.Add(kv.Key);
+                lista.Add(new[] { kv.Value, kv.Key });
+            }
+            var items = lista
+                .OrderBy(p => p[0], StringComparer.OrdinalIgnoreCase)
+                .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase)
+                .Take(600)
                 .ToList();
 
             var dlg = new Form();
@@ -9536,13 +9643,12 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var todosDaGrade = new List<ListViewItem>();
             foreach (var p in items)
             {
-                var it = new ListViewItem(cands[p]);
-                it.Tag = p;
-                it.ToolTipText = p;
-                it.ImageIndex = -1;
+                var it = new ListViewItem(p[0]);
+                it.Tag = p[1];
+                it.ToolTipText = p[1];                it.ImageIndex = -1;
                 grade.Items.Add(it);
                 todosDaGrade.Add(it);
-                mapa[p] = it;
+                mapa[p[1]] = it;
             }
             var prontos = new List<object[]>();    // [caminho, icone]
             var extrator = new Thread(new ThreadStart(delegate
@@ -9550,9 +9656,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 foreach (var p in items)
                 {
                     Icon ic = null;
-                    try { ic = Icon.ExtractAssociatedIcon(p); } catch { }
+                    try { ic = Icon.ExtractAssociatedIcon(p[1]); } catch { }
                     if (ic == null) continue;
-                    try { lock (prontos) prontos.Add(new object[] { p, (Icon)ic.Clone() }); }
+                    try { lock (prontos) prontos.Add(new object[] { p[1], (Icon)ic.Clone() }); }
                     catch { try { ic.Dispose(); } catch { } }
                 }
             }));
