@@ -3257,6 +3257,19 @@ public static string UrbanGetServers(string accsToken)
                 if (a == null || String.IsNullOrEmpty(a.Name)) continue;
                 appList.Add(new Programa { Name = a.Name, Path = a.Path, Domains = a.Domains ?? new List<string>() });
             }
+            // adiciona o Discord como programa padrão se não estiver na lista
+            if (!appList.Any(a => String.Equals(a.Name, "Discord", StringComparison.OrdinalIgnoreCase)))
+            {
+                var caminhoDiscord = AcharCaminhoDiscord();
+                if (!String.IsNullOrEmpty(caminhoDiscord))
+                {
+                    var domains = Dados.AppPresets.ContainsKey("Discord")
+                        ? Dados.AppPresets["Discord"].ToList()
+                        : new List<string>();
+                    appList.Add(new Programa { Name = "Discord", Path = caminhoDiscord, Domains = domains });
+                    Log("Discord adicionado como programa padrão do tunel: " + caminhoDiscord);
+                }
+            }
             // portas aprendidas
             var pm = Store.LerPortas();
             portasPorIP = pm.PorIP ?? new Dictionary<string, List<int>>();
@@ -4900,6 +4913,49 @@ public static string UrbanGetServers(string accsToken)
             if (connected) { try { SincronizarRotas(); } catch { } }
         }
 
+        // Acha o executavel do Discord onde estiver (instalacao do usuario).
+        string AcharCaminhoDiscord()
+        {
+            try
+            {
+                foreach (var p in Process.GetProcessesByName("Discord"))
+                {
+                    try
+                    {
+                        var cam = p.MainModule.FileName;
+                        if (!String.IsNullOrEmpty(cam) && File.Exists(cam)) return cam;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            var locais = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "Discord.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Discord", "Discord.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Discord", "Discord.exe"),
+            };
+            foreach (var local in locais)
+            {
+                try
+                {
+                    if (!String.IsNullOrEmpty(local) && File.Exists(local)) return local;
+                    var dir = Path.GetDirectoryName(local);
+                    if (!String.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    {
+                        foreach (var sub in Directory.GetDirectories(dir, "app-*"))
+                        {
+                            var cand = Path.Combine(sub, "Discord.exe");
+                            if (File.Exists(cand)) return cand;
+                        }
+                    }
+                }
+                catch { }
+            }
+            return "";
+        }
+
         // ============================================================
         //  DOWNLOADS (VPN Gate com repeticao + fontes publicas)
         // ============================================================
@@ -6260,17 +6316,27 @@ public static string UrbanGetServers(string accsToken)
             if (connected)
             {
                 reAuto = 0;
-                // O DISCORD NAO E TOCADO: nem fecha/abre, nem Ctrl+R. Fechar o
-                // programa do usuario a forca e roubar o foco da tela com o
-                // Ctrl+R era pior do que esperar. Quando a VPN troca de servidor,
-                // as rotas passam a apontar para o gateway do tunel novo e o
-                // proprio Discord percebe a queda e reconecta sozinho.
-                try
+                // Primeira conexao da sessao: fecha e abre o Discord (se estiver
+                // aberto ou fechado). Nas trocas de servidor seguintes, se o
+                // Discord nao estiver rodando, abre ele.
+                if (!primeiraConexaoFeita)
                 {
-                    if (Process.GetProcessesByName("Discord").Length > 0)
-                        Log("Discord continua aberto - ele percebe a troca e reconecta sozinho pelo tunel novo (o texto volta em segundos).");
+                    primeiraConexaoFeita = true;
+                    ReiniciarOuAbrirDiscord();
                 }
-                catch { }
+                else
+                {
+                    // Discord ja esta aberto? Nao faz nada - ele reconecta sozinho.
+                    // Se nao estiver rodando, abre.
+                    try
+                    {
+                        if (Process.GetProcessesByName("Discord").Length == 0)
+                            ReiniciarOuAbrirDiscord();
+                        else
+                            Log("Discord continua aberto - ele percebe a troca e reconecta sozinho pelo tunel novo (o texto volta em segundos).");
+                    }
+                    catch { }
+                }
             }
             else if (autoRecon && reAuto > 0)
             {
@@ -6280,6 +6346,10 @@ public static string UrbanGetServers(string accsToken)
         }
 
         int conexaoNumero = 0;
+        // Primeira conexao bem-sucedida da sessao: fecha e abre o Discord
+        // (se estiver aberto ou fechado). Nas trocas de servidor depois disso,
+        // nada eh feito com o Discord.
+        bool primeiraConexaoFeita = false;
 
         void Desconectar()
         {
@@ -6295,6 +6365,45 @@ public static string UrbanGetServers(string accsToken)
                 AtualizarEstadoConexao();
             });
             Log("Desconectado.");
+        }
+
+        // Fecha e abre o Discord (ou apenas abre se nao estiver rodando).
+        // Chamado APENAS na primeira conexao bem-sucedida da sessao.
+        void ReiniciarOuAbrirDiscord()
+        {
+            try
+            {
+                // Fecha processos existentes
+                foreach (var p in Process.GetProcessesByName("Discord"))
+                {
+                    try
+                    {
+                        if (!p.HasExited)
+                        {
+                            p.CloseMainWindow();
+                            p.WaitForExit(2000);
+                        }
+                        if (!p.HasExited) p.Kill();
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            // Abre novamente
+            try
+            {
+                var caminho = AcharCaminhoDiscord();
+                if (String.IsNullOrEmpty(caminho) || !File.Exists(caminho)) return;
+                var psi = new ProcessStartInfo(caminho)
+                {
+                    UseShellExecute = true,
+                    WindowStyle = ProcessWindowStyle.Normal
+                };
+                Process.Start(psi);
+                Log("Discord reaberto pelo tunel.");
+            }
+            catch { }
         }
 
         void AtualizarEstadoConexao()
