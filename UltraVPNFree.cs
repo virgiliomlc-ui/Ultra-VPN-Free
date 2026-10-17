@@ -446,7 +446,6 @@ namespace UltraVPN
                             "uvpn.local", Pasta(),
                             CoreWebView2HostResourceAccessKind.DenyCors);
 
-                        // TEMP: mede quanto custa uma segunda navegacao
                         core.WebMessageReceived += delegate (object s, CoreWebView2WebMessageReceivedEventArgs e)
                         {
                             try { Receber(e.WebMessageAsJson); }
@@ -5808,8 +5807,11 @@ Bitmap MontarFundoCover()
             foreach (var s in nova) if (s.Port > 0) comPorta.Add(s.IP);
             var limpos = new List<Servidor>();
             var vistosFim = new HashSet<string>();
+            int ipRuim = 0;
             foreach (var s in nova)
             {
+                // IP que nao pode ser de uma maquina nunca entra na lista
+                if (!IpDeHost(s.IP)) { ipRuim++; continue; }
                 if (s.Port <= 0 && comPorta.Contains(s.IP)) continue;   // a de porta manda
                 if (s.Port <= 0 && s.Src == "hunt")
                 {
@@ -5831,6 +5833,8 @@ Bitmap MontarFundoCover()
             }
             nova = limpos;
             servers = nova;
+            if (ipRuim > 0)
+                Log(ipRuim + " servidores fora da lista por trazerem IP invalido (a fonte mandou numero quebrado).");
             if (sortCol < 0) OrdenarPadrao();
             AtualizarLista();
             if (foraAmericas > 0) Log(foraAmericas + " servidores fora da America do Sul foram tirados da lista (Brasil, America Central, Norte, India, Japao, Europa...).");
@@ -6936,6 +6940,33 @@ Bitmap MontarFundoCover()
                 try { if (telaWeb) EnviarLista(); } catch { }
             }
             catch (Exception e) { try { Log("Nao deu para medir a velocidade: " + e.Message); } catch { } }
+        }
+
+        // o IP pode ser o endereco de uma maquina de verdade? Rejeita o que a
+        // fonte mandou quebrado. Medido no telexy: veio 38.25.50.0 (Trujillo,
+        // Peru) em DUAS portas - .0 e o endereco da rede, nao de uma
+        // maquina, e nao responde nem no ping. Fonte com numero quebrado e
+        // problema da fonte, nao nosso.
+        static bool IpDeHost(string ip)
+        {
+            if (String.IsNullOrWhiteSpace(ip)) return false;
+            var m = Regex.Match(ip.Trim(), @"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$");
+            if (!m.Success) return false;
+            int a, b, c, d;
+            if (!Int32.TryParse(m.Groups[1].Value, out a)) return false;
+            if (!Int32.TryParse(m.Groups[2].Value, out b)) return false;
+            if (!Int32.TryParse(m.Groups[3].Value, out c)) return false;
+            if (!Int32.TryParse(m.Groups[4].Value, out d)) return false;
+            if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+            if (a == 0) return false;                       // "este" / 0.0.0.0
+            if (a >= 224) return false;                     // multicast e reserva
+            if (a == 127) return false;                     // loopback
+            if (a == 10) return false;                      // rede interna
+            if (a == 172 && b >= 16 && b <= 31) return false;
+            if (a == 192 && b == 168) return false;
+            if (a == 169 && b == 254) return false;         // link-local
+            if (d == 0 || d == 255) return false;           // rede e broadcast
+            return true;
         }
 
         bool TemPaisNaLista(string iso)
