@@ -9601,6 +9601,8 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                     try { p.Kill(); } catch { }
                 foreach (var p in Process.GetProcessesByName("openvpnserv"))
                     try { p.Kill(); } catch { }
+                foreach (var p in Process.GetProcessesByName("openvpn-gui"))
+                    try { p.Kill(); } catch { }
             }
             catch { }
 
@@ -9651,7 +9653,11 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                     if (k != null) k.DeleteSubKeyTree("Ultra VPN Free", false);
                 using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                            @"Software\Microsoft\Windows\CurrentVersion\Uninstall", true))
+                {
+                    // as duas variacoes de nome que o programa ja usou
                     if (k != null) k.DeleteSubKeyTree("UltraVPNFree", false);
+                    if (k != null) k.DeleteSubKeyTree("Ultra VPN Free", false);
+                }
                 using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey, true))
                     if (k != null) k.DeleteValue(RunNome, false);
                 feito.Add("registro limpo");
@@ -9669,9 +9675,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             try { Thread.Sleep(1000); } catch { }
             try
             {
-                // a pasta da tela: ...\Ultra VPN Free\web (com os dados do
-                // navegador dentro). Tenta algumas vezes: o processo do
-                // navegador pode levar um instante para soltar os arquivos.
+                // 1) a pasta da tela: ...\Ultra VPN Free\web (com os dados do
+                //    navegador dentro). Prende arquivos: tenta mais vezes, o
+                //    processo do navegador pode levar um instante para sair.
                 var web = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Ultra VPN Free", "web");
@@ -9680,30 +9686,50 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                     try { Directory.Delete(web, true); } catch { }
                     if (Directory.Exists(web)) Thread.Sleep(700);
                 }
-                if (Directory.Exists(web)) sobrou.Add("pasta da tela (web): " + web);
 
-                if (Directory.Exists(Store.DirDados)) Directory.Delete(Store.DirDados, true);
-                if (Directory.Exists(Store.DirDados)) sobrou.Add("pasta de dados: " + Store.DirDados);
-
-                // %TEMP%\Ultra VPN Free - tambem segue o usuario logado
-                for (int i = 0; i < 3 && Directory.Exists(Store.TempDir); i++)
+                // 2) VARRERUDA COMPLETA: TODA pasta que o programa criou desde
+                //    a primeira abertura, nas duas raizes (dados do usuario e
+                //    TEMP). Pega a pasta de dados, a pasta da tela, a pasta
+                //    temporaria, as sobras de versoes antigas (UltraVPNFreeCS)
+                //    e qualquer variante com sufixo. Os padroes so batem com
+                //    pastas do Ultra VPN Free - nada mais e tocado.
+                foreach (var raiz in new[] {
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    Path.GetTempPath() })
                 {
-                    try { Directory.Delete(Store.TempDir, true); } catch { }
-                    if (Directory.Exists(Store.TempDir)) Thread.Sleep(500);
+                    if (String.IsNullOrEmpty(raiz) || !Directory.Exists(raiz)) continue;
+                    foreach (var padrao in new[] { "Ultra VPN Free*", "UltraVPNFree*" })
+                        try
+                        {
+                            foreach (var d in Directory.GetDirectories(raiz, padrao))
+                                try { Directory.Delete(d, true); } catch { }
+                        }
+                        catch { }
                 }
-                if (Directory.Exists(Store.TempDir)) sobrou.Add("pasta temporaria: " + Store.TempDir);
-                // o MSI que o .exe extrai para instalar o OpenVPN. Depois da
-                // instalacao ele ja e apagado, mas se a instalacao falhar no
-                // meio ele fica orfao em %TEMP%.
+
+                // 3) o MSI que o .exe extrai para instalar o OpenVPN. Depois da
+                //    instalacao ele ja e apagado, mas se a instalacao falhar no
+                //    meio ele fica orfao em %TEMP%.
                 var msiTemp = Path.Combine(Path.GetTempPath(), "uvpn_openvpn.msi");
                 if (File.Exists(msiTemp)) File.Delete(msiTemp);
-                // nomes antigos, de versoes anteriores do programa
-                var dadosAntigo = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UltraVPNFreeCS");
-                if (Directory.Exists(dadosAntigo)) Directory.Delete(dadosAntigo, true);
-                var tempAntigo = Path.Combine(Path.GetTempPath(), "UltraVPNFreeCS");
-                if (Directory.Exists(tempAntigo)) Directory.Delete(tempAntigo, true);
-                feito.Add("pastas de dados apagadas");
+
+                // 4) conferencia final: qualquer pasta que tenha sobrado
+                //    (arquivo travado por outro processo) vai para o resumo
+                foreach (var raiz in new[] {
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    Path.GetTempPath() })
+                {
+                    if (String.IsNullOrEmpty(raiz) || !Directory.Exists(raiz)) continue;
+                    foreach (var padrao in new[] { "Ultra VPN Free*", "UltraVPNFree*" })
+                        try
+                        {
+                            foreach (var d in Directory.GetDirectories(raiz, padrao))
+                                sobrou.Add("pasta: " + d);
+                        }
+                        catch { }
+                }
+
+                feito.Add("pastas criadas pelo programa apagadas (dados, tela, temporarios e versoes antigas)");
             }
             catch { sobrou.Add("alguma pasta de dados ficou"); }
 
