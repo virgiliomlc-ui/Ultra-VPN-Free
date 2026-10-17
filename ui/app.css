@@ -104,12 +104,15 @@ body.tema-goku::after {
   display:flex; align-items:center; justify-content:center;
 }
 /* o et: 17x17, fundo transparente (como o SemPretoDeFundo do C# faz),
-   e ele sozinho ocupa o trilho inteiro. mix-blend-mode: screen
-   reproduz o mesmo efeito do preto do GIF sumir. */
+   e ele sozinho ocupa o trilho inteiro.
+   NAO usar mix-blend-mode aqui: o quadro ja chega com alfa de verdade, e o
+   blend "screen" sumia com o contraste e deixava o ET lavado em cima do
+   fundo do alien. Sem ele o ET sai nitido. O drop-shadow e so uma sombra
+   fininha para o ET nao sumir quando passa por parte clara da foto. */
 .cx .polegar img {
   width:17px; height:17px; object-fit:cover; display:block;
   background:transparent; border-radius:0; box-shadow:none;
-  mix-blend-mode:screen;
+  filter:drop-shadow(0 0 2px rgba(0,0,0,.9));
 }
 /* caixa que NAO rola: nada de trilho (igual o programa de hoje) */
 .cx.semRolagem .trilho { display:none; }
@@ -156,7 +159,31 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 .btnLar { color:#ffb703; border-color:rgba(255,183,3,.55); }
 .btnLar:hover { background:rgba(255,183,3,.16); border-color:#ffb703; }
 .check { display:flex; align-items:center; gap:8px; color:#dff2f6; white-space:nowrap; cursor:pointer; }
-.check input { width:15px; height:15px; accent-color:#00d8de; flex:0 0 auto; cursor:pointer; }
+/* caixa de marcada desenhada a mao: a do navegador era um quadrado branco
+   que destoavaThemes. unmarked fica escuro com borda ciano; marcada fica
+   quase toda preenchida de ciano, com o visto escuro por cima - que e como
+   a caixa de verifica do Windows ficava antes. */
+.check input {
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:16px; height:16px; flex:0 0 auto; cursor:pointer; margin:0;
+  position:relative;
+  background:rgba(4,16,20,.85);
+  border:1.5px solid rgba(0,216,222,.60);
+  border-radius:3px;
+  box-sizing:border-box;
+  transition:background .08s linear, border-color .08s linear;
+}
+.check input:hover { border-color:#7ff3f6; }
+.check input:checked {
+  background:#00d8de;
+  border-color:#8ff6f9;
+}
+.check input:checked::after {
+  content:""; position:absolute; left:3.5px; top:0px;
+  width:5px; height:10px;
+  border:solid #04252a; border-width:0 2.5px 2.5px 0;
+  transform:rotate(42deg);
+}
 
 /* ---------- CONECTAR ---------- */
 #linhaConectar { display:flex; align-items:center; gap:16px; padding:9px 18px 0; flex:0 0 auto; }
