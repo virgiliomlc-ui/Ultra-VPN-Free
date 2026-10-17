@@ -158,32 +158,39 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 #colDir { flex:0 0 300px; display:flex; flex-direction:column; gap:5px; }
 .btnLar { color:#ffb703; border-color:rgba(255,183,3,.55); }
 .btnLar:hover { background:rgba(255,183,3,.16); border-color:#ffb703; }
-.check { display:flex; align-items:center; gap:8px; color:#dff2f6; white-space:nowrap; cursor:pointer; }
-/* caixa de marcada desenhada a mao: a do navegador era um quadrado branco
-   que destoavaThemes. unmarked fica escuro com borda ciano; marcada fica
-   quase toda preenchida de ciano, com o visto escuro por cima - que e como
-   a caixa de verifica do Windows ficava antes. */
+.check { display:flex; align-items:center; gap:6px; color:#dff2f6; white-space:nowrap; cursor:pointer; }
+/* A MESMA caixa que o WinForms desenhava na classe CbVidro, agora em CSS.
+   La o codigo era:
+       t = 13            -> quadradinho de 13 px
+       m = 2             -> folga de 2 px
+       fundo  = FromArgb(175,   6,  19,  21)
+       borda  = FromArgb(200,  74, 138, 146)
+       marcada = degradê vertical, de FromArgb(240,150,244,234)
+                 ate FromArgb(240, 22,110,120), preenchendo o miolo
+   Repare que NAO existe nenhum visto desenhado: e so o quadradinho ciano
+   quase todo preenchido, com degrade. Era assim antes de virar HTML. */
 .check input {
   appearance:none; -webkit-appearance:none; -moz-appearance:none;
-  width:16px; height:16px; flex:0 0 auto; cursor:pointer; margin:0;
-  position:relative;
-  background:rgba(4,16,20,.85);
-  border:1.5px solid rgba(0,216,222,.60);
-  border-radius:3px;
-  box-sizing:border-box;
-  transition:background .08s linear, border-color .08s linear;
+  width:13px; height:13px; flex:0 0 auto; cursor:pointer;
+  margin:0; padding:0; box-sizing:border-box; position:relative;
+  background:rgba(6,19,21,.686); background-clip:border-box;
+  border:1px solid rgba(74,138,146,.784);
+  border-radius:0;
 }
-.check input:hover { border-color:#7ff3f6; }
-.check input:checked {
-  background:#00d8de;
-  border-color:#8ff6f9;
-}
+.check input:hover { border-color:rgba(120,220,228,.95); }
+/* o miolo: 8 x 8, centrado por conta propria (left/top 50% + translate).
+   Antes era 9 x 9 com left:1px, o que dependia da borda dar 1 px exato:
+   medindo, a folga da esquerda ficava 1,89 px e a da direita 2,11 px, ou
+   seja o quadrado estava 0,22 px fora do centro. */
 .check input:checked::after {
-  content:""; position:absolute; left:3.5px; top:0px;
-  width:5px; height:10px;
-  border:solid #04252a; border-width:0 2.5px 2.5px 0;
-  transform:rotate(42deg);
+  content:""; position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:8px; height:8px;
+  background:linear-gradient(180deg,
+              rgba(150,244,234,.941) 0%,
+              rgba(22,110,120,.941) 100%);
 }
+.check input:disabled { opacity:.55; cursor:default; }
 
 /* ---------- CONECTAR ---------- */
 #linhaConectar { display:flex; align-items:center; gap:16px; padding:9px 18px 0; flex:0 0 auto; }
