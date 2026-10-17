@@ -156,6 +156,13 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 .spark { width:86px; height:18px; vertical-align:middle; }
 .mbps { color:#57ff8f; }
 .mbps.zero { color:#6f8b93; }
+/* cor por coluna, como o programa antigo fazia no ListView:
+     pais e protocolo em ciano, o SEU ping no mesmo verde da velocidade
+   (o "-" sem medida fica apagado, para nao parecer medida) */
+tbody tr.srv td:nth-child(1) { color:#4ee6ea; }
+tbody tr.srv td:nth-child(3) { color:#57ff8f; }
+tbody tr.srv td:nth-child(3).semMedida { color:#6f8b93; }
+tbody tr.srv td:nth-child(5) { color:#4ee6ea; }
 
 /* ---------- programas ---------- */
 #rotProgramas { padding:7px 18px 2px; color:#9fd4dd; flex:0 0 auto; }

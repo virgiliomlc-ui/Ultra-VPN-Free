@@ -6342,6 +6342,21 @@ Bitmap MontarFundoCover()
                                + (vb != null && vb.Count > 0 ? ", VPNBook " + vb.Count : "")
                                + (ovpns > 0 ? ", " + ovpns + " .ovpn baixados" : "") + ".";
                     try { if (!saindo) Log(msg); } catch { }
+
+                    // AO ENTRAR NO PROGRAMA: depois de buscar as fontes, mede
+                    // o ping E a velocidade de uma vez. Sem isto a tabela
+                    // ficava varios segundos com o ping em "-" e a
+                    // velocidade vazia, e o usuario tinha que apertar o botao.
+                    try
+                    {
+                        new Thread(new ThreadStart(delegate
+                        {
+                            System.Threading.Thread.Sleep(900);
+                            try { if (!saindo && !disposing) BeginInvoke((Action)delegate { MedirTudo(); }); }
+                            catch { }
+                        })).Start();
+                    }
+                    catch { }
                 }
                 catch { }
             });
@@ -6852,6 +6867,91 @@ Bitmap MontarFundoCover()
         // ============================================================
         //  MEDICAO DE PING (botao "Medir ping")
         // ============================================================
+        // ---------------- VELOCIDADE ----------------
+        // A velocidade de cada servidor e o QUE A FONTE MEDIU (o telexy e a
+        // lista publica mandam speed junto com o servidor). Nao da para
+        // medir daqui sem abrir um tunel em cada servidor - o que da e pedir
+        // as fontes de novo e atualizar o numero de quem continua na lista.
+        void MedirVelocidades()
+        {
+            try
+            {
+                var jobs = new List<string[]>();
+                foreach (var p in Dados.PvlPaises)
+                {
+                    if (!TemPaisNaLista(p.ISO)) continue;
+                    if (p.TemPvl && !String.IsNullOrEmpty(p.Slug)) jobs.Add(new string[] { "pvl", p.ISO + "|" + p.Slug });
+                    jobs.Add(new string[] { "tlx", p.ISO + "|" });
+                }
+                if (jobs.Count == 0) return;
+
+                Log("Medindo a velocidade nos " + jobs.Count + " enderecos das fontes...");
+                var vel = new Dictionary<string, long>();
+                var lote = new List<Thread>();
+                foreach (var j in jobs)
+                {
+                    var job = j;
+                    var t = new Thread(new ThreadStart(delegate
+                    {
+                        try
+                        {
+                            var partes = job[1].Split('|');
+                            string iso = partes[0];
+                            string url = job[0] == "tlx" ? Dados.TlxUrl + "/vpn?country=" + iso + "&limit=50"
+                                      : Dados.PvlUrl + "/country/" + partes[1] + "/";
+                            var txt = PegarTexto(url, 20000);
+                            if (String.IsNullOrWhiteSpace(txt)) return;
+                            List<Servidor> novos = job[0] == "tlx" ? Rede.ParseTlxJson(txt, iso)
+                                                                    : Rede.ParsePvlPage(txt, iso);
+                            if (novos == null) return;
+                            lock (vel)
+                                foreach (var ns in novos)
+                                    if (ns != null && ns.Speed > 0 && !vel.ContainsKey(ns.IP)) vel[ns.IP] = ns.Speed;
+                        }
+                        catch { }
+                    }));
+                    t.IsBackground = true;
+                    t.Start();
+                    lote.Add(t);
+                    // 6 por vez, e ESPERA o lote terminar antes do proximo:
+                    // sem essa espera a funcao contava as velocidades antes
+                    // de elas chegarem e dava 0
+                    if (lote.Count >= 6)
+                    {
+                        foreach (var x in lote) { try { x.Join(); } catch { } }
+                        lote.Clear();
+                        Thread.Sleep(120);
+                    }
+                }
+                foreach (var x in lote) { try { x.Join(); } catch { } }
+
+                int mudou = 0;
+                foreach (var s in servers)
+                {
+                    if (s == null) continue;
+                    long v;
+                    if (vel.TryGetValue(s.IP, out v) && v > 0 && s.Speed != v) { s.Speed = v; mudou++; }
+                }
+                Log("Velocidade atualizada em " + vel.Count + " servidores (" + mudou + " mudaram).");
+                try { if (telaWeb) EnviarLista(); } catch { }
+            }
+            catch (Exception e) { try { Log("Nao deu para medir a velocidade: " + e.Message); } catch { } }
+        }
+
+        bool TemPaisNaLista(string iso)
+        {
+            try
+            {
+                foreach (var s in servers)
+                    if (s != null && s.ISO == iso) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        // ============================================================
+        //  MEDIR TUDO: o ping E a velocidade
+        // ============================================================
         void MedirTudo()
         {
             if (servers.Count == 0) return;
@@ -6860,6 +6960,9 @@ Bitmap MontarFundoCover()
             UseWaitCursor = true;
             lblStatus.Text = "Status: medindo seu ping...";
             Log("Medindo o SEU ping em todos os servidores ao mesmo tempo...");
+            // a velocidade vem logo atras, no fim da medicao do ping: e o
+            // que o botao promete ("Medir ping") e o que o usuario espera
+            // ver preenchido ao entrar no programa
             // mede TODOS (eram so 60: o resto ficava com "-" para sempre)
             var alvo = servers.ToList();
             ThreadPool.QueueUserWorkItem(delegate
@@ -6947,6 +7050,28 @@ Bitmap MontarFundoCover()
                         btnPing.Enabled = true;
                         btnRefresh.Enabled = true;
                         UseWaitCursor = false;
+                        // VELOCIDADE: o botao mede ping E velocidade. A
+                        // medicao roda na propria thread do ping (ja estamos
+                        // fora da fila da interface) e so volta para a tela
+                        // quando acaba.
+                        try
+                        {
+                            new Thread(new ThreadStart(delegate
+                            {
+                                try
+                                {
+                                    MedirVelocidades();
+                                    BeginInvoke((Action)delegate
+                                    {
+                                        try { AtualizarLista(); } catch { }
+                                        btnPing.Enabled = true;
+                                        btnRefresh.Enabled = true;
+                                    });
+                                }
+                                catch { }
+                            })).Start();
+                        }
+                        catch { }
                     });
                 }
                 catch

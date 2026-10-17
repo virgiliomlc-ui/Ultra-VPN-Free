@@ -219,7 +219,7 @@ function aplicarServidores(d) {
     html += '<tr class="srv' + (i === srvSel ? ' sel' : '') + '" data-i="' + i + '">' +
       '<td>' + esc(nome) + '</td>' +
       '<td>' + esc(s.ip) + (s.porta ? ':' + s.porta : '') + '</td>' +
-      '<td>' + (s.ping >= 0 ? (s.ping + ' ms') : '-') + '</td>' +
+      '<td' + (s.ping >= 0 ? '' : ' class="semMedida"') + '>' + (s.ping >= 0 ? (s.ping + ' ms') : '-') + '</td>' +
       '<td>' + sparkline(pct) + ' <span class="mbps' + (mbps < 0.05 ? ' zero' : '') + '">' + txtVel + '</span></td>' +
       '<td>' + esc(s.proto) + '</td>' +
       '</tr>';
