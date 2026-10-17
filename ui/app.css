@@ -9,23 +9,23 @@
 
 * { margin:0; padding:0; box-sizing:border-box; }
 
-html, body { width:100%; height:100%; overflow:hidden; background:#0b0e10; }
+html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
 body {
   display:flex; align-items:center; justify-content:center;
   font-family:"Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 
 /* ---------------- a janela ----------------
-   O mockup desenhava a janela de 917 x 756 centralizada com sombra,
-   dentro de uma pagina escura. Aqui quem centraliza e a janela do
-   Windows (ela ja nasce em CenterScreen com este tamanho); por isso o
-   html/body enchem a tela toda e a borda arredondada some - fora dela
-   fica a barra de titulo nativa, e nao o desenho. */
+   O fundo NAO e desenhado aqui: a janela do Windows ja pinta os 3 temas
+   (foto do alien, degrade escuro, foto do Goku com veu) e o WebView2 esta
+   transparente em cima dela. Pintar o fundo duas vezes fazia a tela
+   diferente do desenho e, com fundo opaco, o Chromium ligava o ClearType:
+   as letras saiam com franja vermelha e verde no fundo escuro. */
 #janela {
   width:100%; height:100%;
   display:flex; flex-direction:column;
   overflow:hidden;
-  background:#05080a url('fundo.alien.jpg') center center/cover no-repeat;
+  background:transparent;
   color:#e8f4f8; font-size:13px;
 }
 

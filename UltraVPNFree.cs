@@ -348,6 +348,14 @@ namespace UltraVPN
                     try
                     {
                         var opts = new CoreWebView2EnvironmentOptions();
+                        // --disable-lcd-text desliga o texto LCD (ClearType).
+                        // Sem isto o WebView2 desenha as letras com franja
+                        // vermelha e verde, e sobre o fundo escuro e
+                        // fotografico do alien isso suja o texto: da para ver
+                        // comparando as duas telas. Desligado, o navegador
+                        // usa antisserrilhado cinza, que e o que o desenho
+                        // mostra e o que fica limpo no fundo escuro.
+                        opts.AdditionalBrowserArguments = "--disable-lcd-text";
                         // PRIMEIRO parametro (pasta do navegador) tem que
                         // ser null: e o que diz ao WebView2 para usar o
                         // Runtime JA INSTALADO no Windows. Se mandar uma
@@ -369,6 +377,22 @@ namespace UltraVPN
                         if (core == null) return;
                         wv = web;
                         cw = core;
+
+                        // O fundo NAO e mais desenhado pelo CSS: a janela do WinForms ja sabe
+// pintar os 3 temas (MontarFundo: foto do alien, degrade escuro, foto do
+// Goku com veu). Deixar o WebView2 transparente faz duas coisas:
+                        //  1) o fundo sai sempre certo, sem duplicar regra
+                        //  2) o Chromium so usa antisserrilhado CINZA em
+                        //     superficie transparente; com fundo opaco ele
+                        //     usa ClearType e a letra ganha franja vermelha
+                        //     e verde, que no fundo escuro do alien suja o
+                        //     texto. Era o que o desenho nao tinha.
+                        try
+                        {
+                            web.DefaultBackgroundColor = Color.Transparent;
+                            Rastro("fundo transparente ligado");
+                        }
+                        catch (Exception e2) { Rastro("fundo transparente falhou: " + e2.Message); }
 
                         var st = core.Settings;
                         st.AreDefaultContextMenusEnabled = false;
@@ -452,9 +476,63 @@ namespace UltraVPN
         public static bool AutoStart = false;    // -Auto  : abre e conecta
         public static bool ConectaAgora = false; // -Conectar: reaberto elevado
 
+        // O PROCESSO PRECISA SE DECLARAR CONHECEDOR DE DPI antes de criar
+        // qualquer janela. Sem isso o Windows entrega as coordenadas "de
+        // 96 dpi" e estica tudo por 2,25 no final: e o que deixava a letra
+        // borrada (o WebView2 ainda recebia --embedded-browser-webview-dpi-
+        // awareness=0 e desenhava em 1x). Isso vale tanto para o texto do
+        // HTML quanto para o do Windows Forms.
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool SetProcessDpiAwarenessContext(IntPtr valor);
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool SetProcessDPIAware();
+        [DllImport("user32.dll")]
+        static extern uint GetDpiForSystem();
+
+        // quanto o Windows esta esticando as coisas (2,25 nesta maquina)
+        public static float EscalaDpi()
+        {
+            try
+            {
+                uint d = GetDpiForSystem();
+                if (d > 0) return d / 96f;
+            }
+            catch { }
+            try { using (var g = Graphics.FromHwnd(IntPtr.Zero)) return g.DpiX / 96f; }
+            catch { }
+            return 1f;
+        }
+
+        // 917 x 756 e o tamanho que o usuario ve: com o processo agora
+        // consciente de DPI, o Windows nao estica mais nada, entao a janela
+        // precisa ser criada ja no tamanho fisico equivalente
+        public static Size JanelaDoUsuario()
+        {
+            float e = EscalaDpi();
+            return new Size((int)Math.Round(917 * e), (int)Math.Round(756 * e));
+        }
+
+        static void AcordarComODpi()
+        {
+            try
+            {
+                // 2 = PER_MONITOR_AWARE_V2 (a melhor: Windows 10 1703 em diante)
+                if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return;
+            }
+            catch { }
+            try { if (SetProcessDPIAware()) return; } catch { }
+            try
+            {
+                // ultima recurso: o proprio manifesto do .exe, via API antiga
+                System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+            }
+            catch { }
+        }
+
         [STAThread]
         static void Main(string[] args)
         {
+            AcordarComODpi();
             // as fontes usam TLS 1.2 (o alvo 4.0 do compilador nao liga por padrao)
             try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)768 | SecurityProtocolType.Tls; } catch { }
 
@@ -2932,7 +3010,12 @@ public static string UrbanGetServers(string accsToken)
             Store.Init();
             Text = "Ultra VPN Free - t\u00fanel por aplicativo";
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(917, 756);
+            Size = Program.JanelaDoUsuario();
+            // a tela e desenhada em 917 x 756 de verdade agora (antes o
+            // Windows esticava o bitmap inteiro). Sem isto o Forms
+            // reescalaria por conta propria e a janela ficaria 2,25x maior.
+            AutoScaleMode = AutoScaleMode.None;
+            AutoScaleDimensions = new SizeF(1f, 1f);
             MinimumSize = new Size(760, 640);
             BackColor = Color.FromArgb(6, 18, 20);
             Font = new Font("Segoe UI", 9);
