@@ -3094,7 +3094,6 @@ public static string UrbanGetServers(string accsToken)
         List<PvlTarefa> pvlTasks = new List<PvlTarefa>();
         List<PvlTarefa> pvlQueue = new List<PvlTarefa>();
         List<Servidor> pvlOut = new List<Servidor>();
-        int pvlFalhas = 0;
         Task ipTask = null;
         WebClient ipWc = null;
 
@@ -3269,7 +3268,7 @@ public static string UrbanGetServers(string accsToken)
             btnPing.Text = "Medir ping";
             btnPing.Location = new Point(410, 72);
             btnPing.Size = new Size(94, 28);
-            btnPing.Visible = false;   // medicao de ping/velocidade removida
+            btnPing.Visible = false;   // guardado: o usuario vai usar mais tarde
             Controls.Add(btnPing);
 
             // ---------------- tipo de tunel ----------------
@@ -4175,7 +4174,7 @@ void MandarPaises()
                             return;
                         }
                     case "atualizar": TelaAtualizar(); return;
-                    case "medirPing": return;
+                    case "medirPing": return;   // botao guardado para uso futuro
                     case "mudarPais":
                         {
                             object v; m.TryGetValue("iso", out v);
@@ -5261,19 +5260,6 @@ void MandarPaises()
             return a;
         }
 
-        void RegistrarPing(string ip, int ms)
-        {
-            try
-            {
-                if (String.IsNullOrWhiteSpace(ip) || ms < 0) return;
-                List<int> h;
-                if (!pingHist.TryGetValue(ip, out h) || h == null) { h = new List<int>(); pingHist[ip] = h; }
-                h.Add(ms);
-                while (h.Count > 24) h.RemoveAt(0);
-            }
-            catch { }
-        }
-
         void DesenharCelula(object snd, DrawListViewSubItemEventArgs ev)
         {
             try
@@ -6196,7 +6182,6 @@ Bitmap MontarFundoCover()
         // monta a lista e so entao avisa a tela. Sem fila, sem relogio, sem
         // travamento.
         bool fontesRodando = false;
-        DateTime fontesTerminouEm = DateTime.MinValue;
 
         void IniciarFontesPublicas()
         {
@@ -6233,7 +6218,6 @@ Bitmap MontarFundoCover()
 
         void BuscarFontesPublicas()
         {
-            DateTime t0 = DateTime.Now;
             var jobs = new List<string[]>();     // {tipo, "ISO|slug"}
             foreach (var p in Dados.PvlPaises)
                 if (p.TemPvl && !String.IsNullOrEmpty(p.Slug))
@@ -6244,8 +6228,6 @@ Bitmap MontarFundoCover()
                 jobs.Add(new string[] { "tlx", p.ISO + "|" });
 
             var res = new List<Servidor>[jobs.Count];
-            bool[] respostas = new bool[jobs.Count];
-            int falhas = 0;
             int passo = 5;                       // 5 por vez, como antes
             for (int i = 0; i < jobs.Count; i += passo)
             {
@@ -6270,13 +6252,6 @@ Bitmap MontarFundoCover()
                             List<Servidor> novos = j[0] == "tlx" ? Rede.ParseTlxJson(txt, iso)
                                               : j[0] == "hunt" ? Rede.ParseHuntHtml(txt, iso)
                                               : Rede.ParsePvlPage(txt, iso);
-                            // respondeu, mesmo que sem servidor: conta como
-                            // resposta OK. Antes entrava na conta de "sem
-                            // resposta" e o log acusava 17 falhas quando na
-                            // verdade era so pais que hoje nao tem servidor
-                            // nenhum (Uruguai, Bolivia, Guiana...).
-                            if (respostas == null) respostas = new bool[jobs.Count];
-                            respostas[idx] = true;
                             if (novos != null && novos.Count > 0) res[idx] = novos;
                         }
                         catch { }
@@ -6291,12 +6266,9 @@ Bitmap MontarFundoCover()
             var todos = new List<Servidor>();
             for (int i = 0; i < res.Length; i++)
             {
-                if (!respostas[i]) falhas++;
                 if (res[i] == null) continue;
                 foreach (var s in res[i]) todos.Add(s);
             }
-            fontesTerminouEm = DateTime.Now;
-            pvlFalhas = falhas;
 
             Action entrega = delegate
             {
@@ -6305,9 +6277,6 @@ Bitmap MontarFundoCover()
                     pvlServers = todos;
                     SalvarPvlCache();
                     JuntarListas();
-                    double seg = (DateTime.Now - t0).TotalSeconds;
-                    Log("Fontes publicas: " + todos.Count + " servidores em " + seg.ToString("0") + " s ("
-                        + jobs.Count + " pedidos, " + falhas + " nao responderam).");
                 }
                 catch { }
             };
@@ -6332,10 +6301,6 @@ Bitmap MontarFundoCover()
             {
                 try
                 {
-                    int antes = 0;
-                    try { antes = servers.Count; } catch { }
-                    DateTime t0 = DateTime.Now;
-
                     // ---------- 1) Urban e VPNBook em paralelo ----------
                     var urbanRes = new object[1];
                     var vbRes = new object[1];
@@ -6378,24 +6343,14 @@ Bitmap MontarFundoCover()
                     // Antes ficava antes, e nesse instante a lista ainda era a
                     // antiga: nao baixava nada ("0 .ovpn baixados"). Agora roda
                     // depois que os servidores chegaram de fato.
-                    int ovpns = 0;
                     try
                     {
                         DateTime lim2 = DateTime.Now.AddSeconds(40);
                         while (fontesRodando && DateTime.Now < lim2 && !saindo)
                             System.Threading.Thread.Sleep(200);
-                        ovpns = PrepararOvpnDosNovos();
+                        PrepararOvpnDosNovos();
                     }
                     catch { }
-
-                    int depois = 0;
-                    try { depois = servers.Count; } catch { }
-                    double seg = (DateTime.Now - t0).TotalSeconds;
-                    string msg = "Fontes atualizadas em " + seg.ToString("0.0") + " s: " + antes + " -> " + depois + " servidores"
-                               + (ub != null && ub.Count > 0 ? " (Urban " + ub.Count + ")" : "")
-                               + (vb != null && vb.Count > 0 ? ", VPNBook " + vb.Count : "")
-                               + (ovpns > 0 ? ", " + ovpns + " .ovpn baixados" : "") + ".";
-                    try { if (!saindo) Log(msg); } catch { }
 
 
                 }
@@ -6578,7 +6533,7 @@ Bitmap MontarFundoCover()
                     if (item.Tipo == "hunt") { /* ISO ja ajustado */ }
                     pvlTasks.Add(new PvlTarefa { T = t, ISO = item.ISO, Tipo = item.Tipo, W = wc, Start = DateTime.Now });
                 }
-                catch { pvlFalhas++; }
+                catch { }
             }
         }
 
