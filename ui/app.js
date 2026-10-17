@@ -53,7 +53,7 @@ window.uvfn_recebe = function (d) {
       case 'programas': aplicarProgramas(d); break;
       case 'log':      addLog(d.texto); break;
       case 'ip':       setIp(d.ip); break;
-      case 'status':   setConectado(d.conectado, d.servidor); break;
+      case 'status':   setConectado(d.conectado, d.servidor, d.endereco); break;
       case 'paises':   aplicarPaises(d.paises); break;
       case 'temas':    aplicarTemas(d.temas); break;
       case 'et':       mostrarEt(d.quadros); break;
@@ -141,7 +141,7 @@ function aplicarEstado(d) {
   if (estado.protocolo) document.getElementById('tunel').value = estado.protocolo;
   if (estado.tema) aplicarTema(estado.tema);
   if (estado.ip) setIp(estado.ip);
-  if (typeof estado.conectado !== 'undefined') setConectado(estado.conectado, estado.servidorAtual);
+  if (typeof estado.conectado !== 'undefined') setConectado(estado.conectado, estado.servidorAtual, estado.servidorEndereco);
 }
 
 function setIp(ip) {
@@ -194,9 +194,9 @@ function aplicarServidores(d) {
   estado.ordemCresc = !!d.ordemCresc;
   marcarColunaOrdenada();
   var total = estado.servidores.length;
-  document.getElementById('conta').textContent =
-    total + (total === 1 ? ' servidor na América do Sul | 1 mostrado'
-                         : ' servidores na América do Sul | ' + total + ' mostrados');
+  // nao escreve a linha direto: quem escreve e mostrarLinhaConta(), que
+  // mantem o "Conectado em ..." quando o tunel esta ligado
+  mostrarLinhaConta();
 
   var velocidadeMax = 1;
   for (var i = 0; i < total; i++) {
@@ -371,15 +371,34 @@ function mostrarEt(quadros) {
 }
 
 /* ---------------- status ---------------- */
-function setConectado(conectado, servidor) {
+function setConectado(conectado, servidor, endereco) {
   estado.conectado = !!conectado;
-  estado.servidorAtual = servidor || estado.servidorAtual;
+  if (servidor) estado.servidorAtual = servidor;
+  if (endereco) estado.servidorEndereco = endereco;
   var b = document.getElementById('conectar');
   b.textContent = estado.conectado ? 'DESCONECTAR' : 'CONECTAR';
   b.classList.toggle('conectado', estado.conectado);
-  if (conectado && servidor) {
-    var linha = document.getElementById('conta');
-    linha.textContent = 'Conectado em ' + servidor;
+  mostrarLinhaConta();
+}
+
+// a linha do "conectado em" e a mesma que mostra quantos servidores tem.
+// A lista chega a cada 8 s e escrevia por cima, apagando o nome do servidor
+// ligado - por isso quem escreve e sempre esta funcao, que sabe respeitar as
+// duas coisas.
+function mostrarLinhaConta() {
+  var linha = document.getElementById('conta');
+  if (!linha) return;
+  if (estado.conectado && estado.servidorAtual) {
+    var txt = 'Conectado em ' + estado.servidorAtual;
+    if (estado.servidorEndereco) txt += '  (' + estado.servidorEndereco + ')';
+    linha.textContent = txt;
+    linha.classList.add('conectado');
+  } else {
+    linha.classList.remove('conectado');
+    var t = (estado.servidores || []).length;
+    linha.textContent = t ? (t + (t === 1 ? ' servidor na América do Sul | 1 mostrado'
+                                      : ' servidores na América do Sul | ' + t + ' mostrados'))
+                          : 'carregando servidores...';
   }
 }
 

@@ -91,6 +91,8 @@ thead th .seta { font-size:10px; }
 #barraCtrl { display:flex; align-items:center; gap:10px; padding:6px 18px 0; flex:0 0 auto; }
 #barraCtrl .rot { color:#bcd8de; }
 #conta { text-align:right; color:#4ee6ea; padding:3px 18px 0; flex:0 0 auto; }
+/* tunel ligado: a linha fica verde, como o botao DESCONECTAR */
+#conta.conectado { color:#57ff8f; }
 
 /* ==================================================================
    BARRA VERTICAL COM O ET QUE PISCA

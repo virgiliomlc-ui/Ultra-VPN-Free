@@ -2994,6 +2994,8 @@ public static string UrbanGetServers(string accsToken)
         bool fullTunnel = false;
         int reAuto = 0;
         string servidorAtual = "";
+        // IP e porta que o tunel esta usando - a tela mostra junto do nome
+        string servidorEndereco = "";
         string currentIP = "";
         string versaoNova = "";
         int sortCol = -1;
@@ -4099,7 +4101,8 @@ void MandarPaises()
             {
                 TelaWeb.Mandar("status", new Dictionary<string, object> {
                     { "conectado", ligado },
-                    { "servidor", servidor ?? "" }
+                    { "servidor", servidor ?? "" },
+                    { "endereco", servidorEndereco ?? "" }
                 });
             }
             catch { }
@@ -7626,6 +7629,7 @@ Bitmap MontarFundoCover()
                     btnConnect.BackColor = Color.Transparent;
                     btnConnect.ForeColor = CorVerdeNeon;
                     servidorAtual = "";
+                    servidorEndereco = "";
                     try { trayTimer.Stop(); if (trayFrames != null && trayFrames.Length > 0) tray.Icon = trayFrames[0]; } catch { }
                 }
                 btnConnect.Invalidate();
@@ -8824,6 +8828,16 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                     var cidSrv = Dados.GetServerLocal(s);
                     if (!String.IsNullOrEmpty(cidSrv) && cidSrv != s.Name) servidorAtual = s.Name + " - " + cidSrv;
                     if (usado != "padrao") servidorAtual += " (" + usado.ToUpperInvariant() + ")";
+                }
+                catch { }
+                // o endereco completo que o tunel esta usando, para a tela
+                // mostrar do lado do nome (o antigo mostrava so o nome)
+                try
+                {
+                    var protoMostra = usado;
+                    if (String.IsNullOrEmpty(protoMostra) || usado == "padrao")
+                        protoMostra = s.Proto == "udp" ? "UDP" : s.Proto == "tcp" ? "TCP" : "UDP/TCP";
+                    servidorEndereco = s.IP + ":" + s.Port + "/" + protoMostra.ToUpperInvariant();
                 }
                 catch { }
                 AtualizarEstadoConexao();
