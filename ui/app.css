@@ -171,21 +171,30 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
    quase todo preenchido, com degrade. Era assim antes de virar HTML. */
 .check input {
   appearance:none; -webkit-appearance:none; -moz-appearance:none;
-  width:13px; height:13px; flex:0 0 auto; cursor:pointer;
+  /* Tudo aqui foi escolhido para cair em PIXEL INTEIRO na tela de 225%
+     (dpr 2,25), que e o unico jeito de o miolo ficar igual dos quatro
+     lados. Com 13 px a caixa dava 29,25: o Windows arredondava a largura
+     para 29 e a altura para 30, e sobrava 1 pixel de diferença.
+        caixa  13,3333 px * 2,25 = 30 px  exatos
+        borda   0,4444 px * 2,25 =  1 px  exato (o WinForms tambem pintava
+                                          a borda com 1 pixel de verdade)
+        miolo  (30 - 2 - 20) / 2    =  4 px  de folga em cada lado
+     Sao 0,33 px a mais que os 13 px originais: nao se ve, mas os numeros
+     fecham. */
+  width:13.3333px; height:13.3333px; flex:0 0 auto; cursor:pointer;
   margin:0; padding:0; box-sizing:border-box; position:relative;
   background:rgba(6,19,21,.686); background-clip:border-box;
-  border:1px solid rgba(74,138,146,.784);
+  border:0.4444px solid rgba(74,138,146,.784);
   border-radius:0;
 }
 .check input:hover { border-color:rgba(120,220,228,.95); }
-/* o miolo: 8 x 8, centrado por conta propria (left/top 50% + translate).
-   Antes era 9 x 9 com left:1px, o que dependia da borda dar 1 px exato:
-   medindo, a folga da esquerda ficava 1,89 px e a da direita 2,11 px, ou
-   seja o quadrado estava 0,22 px fora do centro. */
+/* o miolo, com a MESMA folga nos quatro lados (1,7778 px = 4 px de tela).
+   Antes eu centrava com left:50% + translate(-50%): funciona, mas o
+   navegador arredonda a posicao e o tamanho separadamente e saía 1 pixel
+   de diferença entre um lado e outro. Com inset igual nos quatro lados o
+   navegador centraliza por construção. */
 .check input:checked::after {
-  content:""; position:absolute; left:50%; top:50%;
-  transform:translate(-50%,-50%);
-  width:8px; height:8px;
+  content:""; position:absolute; inset:1.7778px;
   background:linear-gradient(180deg,
               rgba(150,244,234,.941) 0%,
               rgba(22,110,120,.941) 100%);
