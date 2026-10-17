@@ -3655,9 +3655,29 @@ public static string UrbanGetServers(string accsToken)
                 // as listas ganham a largura que faltava (o espacinho da direita)
                 try { lv.Width = ClientSize.Width - lv.Left; } catch { }
                 try { lbLog.Width = ClientSize.Width - lbLog.Left; } catch { }
-                // o fundo NAO e montado aqui: quem pinta agora e o HTML. Se o
-                // Runtime faltar, o TelaWebFalhou() chama o AplicarTema() e a
-                // tela antiga volta inteira, fundo e tudo.
+
+                // FUNDO PROVISORIO
+                // A janela aparece em 0,5 s, mas a tela em HTML so entra
+                // uns 3 s depois (o WebView2 demore para subir). Nesse
+                // intervalo a janela ficaria vazia. Aqui pintamos o MESMO
+                // fundo que o app.css vai pintar, no mesmo enquadramento
+                // (cover, centrado), para a janela ja nascer com cara de
+                // programa e nao dar salto quando a tela entrar.
+                // O plano B (sem Runtime) troca este pelo fundo completo,
+                // com as placas de vidro, pelo AplicarTema().
+                try
+                {
+                    var bf = MontarFundoCover();
+                    if (bf != null)
+                    {
+                        var velho0 = imgComp;
+                        imgComp = bf;
+                        BackgroundImage = bf;
+                        BackgroundImageLayout = ImageLayout.Stretch;
+                        if (velho0 != null) { try { velho0.Dispose(); } catch { } }
+                    }
+                }
+                catch { }
 
                 // ============================================================
                 //  TELA EM WEBVIEW2
@@ -3796,7 +3816,13 @@ public static string UrbanGetServers(string accsToken)
                 MandarTemas();
                 // os quadros do ET, sem o preto de fundo (o mesmo trabalho
                 // que o WinForms ja fazia para o polegar da barra)
-                MandarQuadrosEt();
+                // 12 quadros de 600x600 com preenchimento por inundacao: e
+                // caro, e nao e para travar a interface logo na abertura.
+                // Vai para uma thread de fundo e manda quando estiver pronto
+                new Thread(new ThreadStart(delegate
+                {
+                    try { MandarQuadrosEt(); } catch { }
+                })).Start();
                 EnviarProgramas();
                 EnviarLista();
                 EnviarEstado();
@@ -3827,6 +3853,8 @@ public static string UrbanGetServers(string accsToken)
         }
 
         // o ET que pisca: os 12 quadros do tray.gif, virados em data URI
+        // (roda numa thread de fundo: 12 quadros de 600x600 com
+        //  preenchimento por inundacao e trabalho pesado)
         void MandarQuadrosEt()
         {
             try
@@ -3901,7 +3929,13 @@ void MandarPaises()
                         { "proto", String.IsNullOrEmpty(s.Proto) ? "auto" : s.Proto.ToUpperInvariant() }
                     });
                 }
-                TelaWeb.Mandar("servidores", new Dictionary<string, object> { { "lista", lista } });
+                // a coluna que esta valendo e o sentido: e o que faz o
+                // cabecalho da tabela mostrar a seta, igual no WinForms
+                TelaWeb.Mandar("servidores", new Dictionary<string, object> {
+                    { "lista", lista },
+                    { "ordemCol", sortCol },
+                    { "ordemCresc", sortAsc }
+                });
             }
             catch { }
         }
@@ -4026,6 +4060,37 @@ void MandarPaises()
                             if (m.ContainsKey("startup")) { try { DefinirStartup(LeTruth(m["startup"])); } catch { } }
                             if (m.ContainsKey("bootConn")) bootConnect = LeTruth(m["bootConn"]);
                             SalvarEstado();
+                            return;
+                        }
+                    case "mudarOrdem":
+                        {
+                            // clique no cabecalho da tabela da tela web: e a
+                            // MESMA ordenacao do ListView do WinForms, com a
+                            // mesma regra de sentido (A-Z crescente, ping do
+                            // menor, velocidade do maior)
+                            object v; m.TryGetValue("col", out v);
+                            int col = -1;
+                            try { col = Convert.ToInt32(v); } catch { }
+                            try
+                            {
+                                if (col < 0)
+                                {
+                                    sortCol = -1;
+                                    OrdenarPadrao();
+                                }
+                                else
+                                {
+                                    if (sortCol == col) sortAsc = !sortAsc;
+                                    else
+                                    {
+                                        sortCol = col;
+                                        sortAsc = (col != 3);
+                                    }
+                                    OrdenarLista();
+                                }
+                                AtualizarLista();
+                            }
+                            catch { }
                             return;
                         }
                     case "escolherServidor":
@@ -5158,6 +5223,41 @@ void MandarPaises()
         int fundoW = 0, fundoH = 0;
         string fundoTema = "";
         bool fundoUpdate = false;
+
+        // So a foto de fundo, no mesmo "cover" que o app.css usa. E o que a janela
+// mostra nos 2,5 s em que o WebView2 ainda nao chegou.
+Bitmap MontarFundoCover()
+        {
+            try
+            {
+                int w = ClientSize.Width, h = ClientSize.Height;
+                if (w < 200 || h < 200) return null;
+                if (temaAtual == "escuro")
+                {
+                    var bmpE = new Bitmap(w, h);
+                    using (var g = Graphics.FromImage(bmpE))
+                    using (var grad = new LinearGradientBrush(new Point(0, 0), new Point(0, h),
+                        Color.FromArgb(255, 12, 24, 28), Color.FromArgb(255, 4, 10, 12)))
+                        g.FillRectangle(grad, 0, 0, w, h);
+                    return bmpE;
+                }
+                Image foto = temaAtual == "goku" ? (Image)imgFundoGoku : imgFundo;
+                if (foto == null) return null;
+                var bmp = new Bitmap(w, h);
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    int iw = foto.Width, ih = foto.Height;
+                    double esc = Math.Max(w / (double)iw, h / (double)ih);
+                    int nw = (int)Math.Ceiling(iw * esc), nh = (int)Math.Ceiling(ih * esc);
+                    g.DrawImage(foto, (w - nw) / 2, (h - nh) / 2, nw, nh);
+                    if (temaAtual == "goku")
+                        using (var veu = new SolidBrush(Color.FromArgb(105, 0, 0, 0))) g.FillRectangle(veu, 0, 0, w, h);
+                }
+                return bmp;
+            }
+            catch { return null; }
+        }
 
         Bitmap MontarFundo()
         {

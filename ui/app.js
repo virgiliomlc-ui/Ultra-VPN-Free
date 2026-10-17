@@ -166,8 +166,33 @@ function sparkline(pct) {
   return svg + '</svg>';
 }
 
+/* ---------------- ordenar a tabela ----------------
+   Mesmo desenho do ListView do WinForms: clicar no cabecalho ordena por
+   aquela coluna e clicar de novo inverte. O programa faz a ordenacao de
+   verdade (ele que sabe o ping medido e a velocidade); a tela so avisa e
+   desenha a seta. */
+function marcarColunaOrdenada() {
+  var ths = document.querySelectorAll('#lista thead th');
+  for (var i = 0; i < ths.length; i++) {
+    var on = (i === estado.ordemCol);
+    ths[i].className = on ? 'ord' : '';
+    var s = ths[i].querySelector('.seta');
+    if (s) s.textContent = on ? (estado.ordemCresc ? ' ▲' : ' ▼') : '';
+  }
+}
+
+document.addEventListener('click', function (ev) {
+  var th = ev.target.closest ? ev.target.closest('#lista thead th') : null;
+  if (!th) return;
+  ev.preventDefault();
+  manda('mudarOrdem', { col: parseInt(th.getAttribute('data-col'), 10) });
+});
+
 function aplicarServidores(d) {
   estado.servidores = d.lista || [];
+  estado.ordemCol = (typeof d.ordemCol === 'undefined' || d.ordemCol === null) ? -1 : d.ordemCol;
+  estado.ordemCresc = !!d.ordemCresc;
+  marcarColunaOrdenada();
   var total = estado.servidores.length;
   document.getElementById('conta').textContent =
     total + (total === 1 ? ' servidor na América do Sul | 1 mostrado'
