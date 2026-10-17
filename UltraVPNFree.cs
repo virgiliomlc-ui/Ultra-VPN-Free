@@ -1,4 +1,4 @@
-﻿// =====================================================================
+// =====================================================================
 //  ULTRA VPN FREE - EDICAO 100% C# (SEM MOTOR POWERSHELL)
 //  Porta fiel do app original: as 4 fontes de servidores,
 //  lista com grupos das tres Americas + ordenacao por coluna, ping preciso
@@ -43,7 +43,7 @@ namespace UltraVPN
     // programa e de arquivo unico, elas nao estao do lado do exe e o JIT
     // nao as acha -> o programa quebraria na hora de abrir a tela.
     //
-    // Esta classe fica DE PROPÓSITO sem nenhuma referencia a tipo do
+    // Esta classe fica DE PROP�SITO sem nenhuma referencia a tipo do
     // WebView2: se ela citasse WebView2, o JIT precisaria da DLL antes
     // do AssemblyResolve existir, e oprograma cairia antes de chance de
     // tentar qualquer coisa. Aqui so entra System.Reflection.
@@ -78,7 +78,7 @@ namespace UltraVPN
             catch { }
         }
 
-        // Chamar no começo do Main, ANTES de qualquer coisa tocar no
+        // Chamar no come�o do Main, ANTES de qualquer coisa tocar no
         // WebView2. Devolve false quando nao deu: nesse caso o programa
         // continua funcionando com a tela antiga do WinForms.
         public static bool Instalar()
@@ -323,6 +323,29 @@ namespace UltraVPN
         }
 
         // ---------------------------------------------------------------
+        //  AQUECER O NAVEGADOR (chamado no Main, antes da janela)
+        // ---------------------------------------------------------------
+        static Task<CoreWebView2Environment> ambienteTask;
+
+        public static void Aquecer()
+        {
+            try
+            {
+                if (ambienteTask != null) return;
+                if (!CarregarLoader()) return;
+                if (!ExtrairTela()) return;
+                var opts = new CoreWebView2EnvironmentOptions();
+                opts.AdditionalBrowserArguments = "--disable-lcd-text";
+                var dados = Path.Combine(Pasta(), "dados");
+                try { if (!Directory.Exists(dados)) Directory.CreateDirectory(dados); } catch { }
+                // comeca agora e fica guardando: a janela usa o mesmo
+                ambienteTask = CoreWebView2Environment.CreateAsync(null, dados, opts);
+                Rastro("navegador aquecendo");
+            }
+            catch (Exception e) { Rastro("aqueceu falhou: " + e.Message); }
+        }
+
+        // ---------------------------------------------------------------
         //  LIGA A TELA
         // ---------------------------------------------------------------
         public static bool Ligar(Form f, Janela j)
@@ -332,6 +355,7 @@ namespace UltraVPN
             {
                 if (!CarregarLoader()) return false;
                 if (!ExtrairTela()) return false;
+                Aquecer();
 
                 dono = j;
                 forma = f;
@@ -363,9 +387,12 @@ namespace UltraVPN
                         // acha e diz que nao existe Runtime nenhum.
                         // O segundo parametro e onde ficam os dados do
                         // navegador (cache, cookies da tela).
-                        var dados = Path.Combine(Pasta(), "dados");
-                        try { if (!Directory.Exists(dados)) Directory.CreateDirectory(dados); } catch { }
-                        var env = await CoreWebView2Environment.CreateAsync(null, dados, opts);
+                        // PRIMEIRO TENTA O QUE O Main JA VIROU: o processo do
+                        // navegador foi mandado subir em paralelo com a
+                        // montagem da janela, e aqui a gente so espera.
+                        var env = ambienteTask != null
+                            ? await ambienteTask
+                            : await CoreWebView2Environment.CreateAsync(null, Path.Combine(Pasta(), "dados"), opts);
 
                         var web = new WebView2();
                         web.Dock = DockStyle.Fill;
@@ -378,21 +405,23 @@ namespace UltraVPN
                         wv = web;
                         cw = core;
 
-                        // O fundo NAO e mais desenhado pelo CSS: a janela do WinForms ja sabe
-// pintar os 3 temas (MontarFundo: foto do alien, degrade escuro, foto do
-// Goku com veu). Deixar o WebView2 transparente faz duas coisas:
-                        //  1) o fundo sai sempre certo, sem duplicar regra
-                        //  2) o Chromium so usa antisserrilhado CINZA em
-                        //     superficie transparente; com fundo opaco ele
-                        //     usa ClearType e a letra ganha franja vermelha
-                        //     e verde, que no fundo escuro do alien suja o
-                        //     texto. Era o que o desenho nao tinha.
+                        // O fundo dos 3 temas e pintado pelo HTML (app.css, "cover"), e nao pelo
+// Windows. Isso resolve o fundo grande e fora de lugar: o Windows so
+                        // pinta o fundo da Form uma vez e, como o WebView2 e
+                        // um controle por cima, o desenho novo nunca chegava
+                        // a aparecer. O plano B (sem Runtime) continua
+                        // pintando pelo MontarFundo.
                         try
                         {
-                            web.DefaultBackgroundColor = Color.Transparent;
-                            Rastro("fundo transparente ligado");
+                            // OPOQUE, e nao transparente. Com DefaultBackgroundColor
+                            // = Transparente o Chromium NAO pinta o fundo da pagina:
+                            // ele deixa o fundo da janela do Windows aparecer por
+                            // tras, e era esse o fundo grande e fora de lugar. O
+                            // fundo dos 3 temas e do app.css ("cover"), entao a
+                            // cor de baixo so aparece enquanto a foto carrega.
+                            web.DefaultBackgroundColor = Color.FromArgb(5, 8, 10);
                         }
-                        catch (Exception e2) { Rastro("fundo transparente falhou: " + e2.Message); }
+                        catch (Exception e2) { Rastro("fundo do webview falhou: " + e2.Message); }
 
                         var st = core.Settings;
                         st.AreDefaultContextMenusEnabled = false;
@@ -541,6 +570,15 @@ namespace UltraVPN
             // der (Runtime ausente, pasta sem permissao), o programa segue
             // com a tela antiga do WinForms - nunca quebra.
             try { Wv2.Instalar(); } catch { }
+
+            // AQUECER O NAVEGADOR ANTES DA JANELA
+            // O WebView2 so pode nascer quando a janela tem handle, mas o
+            // PROCESSO do navegador nao depende disso. Comecar aqui faz o
+            // Edge WebView2 subir em paralelo com a montagem da tela, em vez
+            // de esperar a janela aparecer para so entao comecar. Medido: a
+            // tela ficava pronta em 3,1 s; o grosso desses 2 s e a subida do
+            // processo do navegador.
+            try { TelaWeb.Aquecer(); } catch { }
 
             foreach (var a in args)
             {
@@ -2343,7 +2381,7 @@ public static string UrbanGetServers(string accsToken)
         // A coluna do IP:porta e colorida pelo proprio ListView (ForeColor do
         // subitem, verde-neon). Nao ha pintura manual aqui de proposito: a
         // lista esta em OwnerDraw, o Windows pinta a linha inteira e uma
-        // repintada por cima via NM_CUSTOMDRAW sao fora — o item ficava
+        // repintada por cima via NM_CUSTOMDRAW sao fora � o item ficava
         // sem pintar.
         void Grupo(IntPtr hdc, IntPtr id)
         {
@@ -2705,7 +2743,7 @@ public static string UrbanGetServers(string accsToken)
             {
                 var g = e.Graphics;
                 // 1) fundo: primeiro cobre TUDO com a cor da caixa (impede que restos
-                // de um quadro fiquem embaixo quando o、Windows repinta so
+                // de um quadro fiquem embaixo quando o?Windows repinta so
                 // um pedaco) e depois entra a foto/vidro do tema por cima
                 using (var br = new SolidBrush(BackColor)) g.FillRectangle(br, ClientRectangle);
                 if (Dono != null) Dono.PintarFatiaFundo(g, this, ClientRectangle);
@@ -3617,19 +3655,25 @@ public static string UrbanGetServers(string accsToken)
                 // as listas ganham a largura que faltava (o espacinho da direita)
                 try { lv.Width = ClientSize.Width - lv.Left; } catch { }
                 try { lbLog.Width = ClientSize.Width - lbLog.Left; } catch { }
-                try { AplicarTema(); } catch { }
+                // o fundo NAO e montado aqui: quem pinta agora e o HTML. Se o
+                // Runtime faltar, o TelaWebFalhou() chama o AplicarTema() e a
+                // tela antiga volta inteira, fundo e tudo.
 
                 // ============================================================
                 //  TELA EM WEBVIEW2
-                // Só aqui: antes do Load a janela ainda não tem handle, e o
-                // WebView2 (que é um controle Windows de verdade) não pode ser
+                // S� aqui: antes do Load a janela ainda n�o tem handle, e o
+                // WebView2 (que � um controle Windows de verdade) n�o pode ser
                 // criado. A janela continua sendo a mesma (form, bandeja,
-                // ícone); o que muda é que o miolo vira HTML. Se o WebView2
-                // não entrar (PC sem o Runtime), o desenho antigo continua.
+                // �cone); o que muda � que o miolo vira HTML. Se o WebView2
+                // n�o entrar (PC sem o Runtime), o desenho antigo continua.
                 // ============================================================
                 telaWeb = false;
                 try { telaWeb = TelaWeb.Ligar(this, this); }
                 catch { telaWeb = false; }
+                // o Ligar pode falhar logo no comeco (sem Runtime, sem handle)
+                // e nesse caso o TelaWebFalhou nem chega a ser chamado: o
+                // fundo do WinForms precisa ser montado na mao aqui
+                if (!telaWeb) { try { AplicarTema(); } catch { } }
             };
 
             // ---------------- timers ----------------
@@ -3774,6 +3818,9 @@ public static string UrbanGetServers(string accsToken)
                 telaWeb = false;
                 TelaWeb.Desligar();
                 foreach (Control c in Controls) c.Show();
+                // o fundo do Windows so e montado aqui (no plano B): com a
+                // tela web ele nao roda, porque quem pinta o fundo e o HTML
+                try { AplicarTema(); } catch { }
                 Log("O Runtime do WebView2 nao esta neste PC - a tela antiga continua valendo.");
             }
             catch { }
@@ -4126,7 +4173,7 @@ void MandarPaises()
                 if (a == null || String.IsNullOrEmpty(a.Name)) continue;
                 appList.Add(new Programa { Name = a.Name, Path = a.Path, Domains = a.Domains ?? new List<string>() });
             }
-            // adiciona o Discord como programa padrão se não estiver na lista
+            // adiciona o Discord como programa padr�o se n�o estiver na lista
             if (!appList.Any(a => String.Equals(a.Name, "Discord", StringComparison.OrdinalIgnoreCase)))
             {
                 var caminhoDiscord = AcharCaminhoDiscord();
@@ -4136,7 +4183,7 @@ void MandarPaises()
                         ? Dados.AppPresets["Discord"].ToList()
                         : new List<string>();
                     appList.Add(new Programa { Name = "Discord", Path = caminhoDiscord, Domains = domains });
-                    Log("Discord adicionado como programa padrão do tunel: " + caminhoDiscord);
+                    Log("Discord adicionado como programa padr�o do tunel: " + caminhoDiscord);
                 }
             }
             // portas aprendidas
@@ -4256,7 +4303,7 @@ void MandarPaises()
             if (estavaNoFim) lbLog.IrParaFim();  // rolagem nossa: sem TopIndex (nada de ShiftWindow na tela)
             else lbLog.Repintar();    // lendo o historico: fica onde voce esta
             // a barra nativa ja foi escurecida na abertura e na troca de tema:
-            // reaplicar a cada linha forçava o Windows a repintar a caixa
+            // reaplicar a cada linha for�ava o Windows a repintar a caixa
             // (era o outro lado do piscado)
         }
 
@@ -4694,7 +4741,7 @@ void MandarPaises()
         }
 
         // REDUZIR EM ETAPAS: o GDI+ nao amostra uma reducao grande de uma vez
-        // (600 -> 64 num passo so = borrão preto). Corta pela metade ate chegar
+        // (600 -> 64 num passo so = borr�o preto). Corta pela metade ate chegar
         // perto do alvo e so entao faz o passo final.
         static Bitmap ReduzirEmPassos(Image fonte, int lado)
         {
@@ -4901,7 +4948,7 @@ void MandarPaises()
                 for (int i = 0; i < n; i++)
                 {
                     try { img.SelectActiveFrame(fd, i); } catch { }
-                    // quadro reduzido EM ETAPAS (600 -> 64 sem virar borrão) e
+                    // quadro reduzido EM ETAPAS (600 -> 64 sem virar borr�o) e
                     // com o preto de fundo removido: o et fica TRANSPARENTE
                     var quadro = QuadroDoEt(img);
                     quadros.Add(quadro);
@@ -5208,6 +5255,13 @@ void MandarPaises()
         void AplicarTema()
         {
             BackColor = Color.FromArgb(6, 18, 20);
+            // Com a tela em WebView2 o fundo e painted pelo proprio HTML
+            // (app.css, "cover"). Montar aqui um bitmap de 2035 x 1622 com
+            // escala bicubica custava tempo de abertura E, como o Windows so
+            // pinta o fundo da Form uma vez, ele nunca chegava a aparecer:
+            // ficava na tela um desenho antigo, com a foto do alien grande e
+            // fora de lugar. Esta funcao so roda no plano B (sem Runtime).
+            if (telaWeb) return;
             try
             {
                 var novo = MontarFundo();
@@ -7416,7 +7470,7 @@ void MandarPaises()
                     {
                         // 400 aqui quase sempre e assinatura vencida: relendo a
                         // lista com credencial nova e tentando o mesmo servidor
-                        urbanAccs = "";                      // força recadastrar
+                        urbanAccs = "";                      // for�a recadastrar
                         urbanProxyToks.Clear();
                         accs = UrbanPegarAccs();
                         try { proxyTok = Rede.UrbanToken(Rede.UrbanGetProxyToken(accs, s.Sig)); } catch { }
@@ -8913,8 +8967,8 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                         var t = ln.Trim();
                         if (t.Length == 0) continue;
                         // NAO se procura o cabecalho em nenhum idioma: ele muda
-                        // ("Network Destination" no ingles, "Endereço de rede"
-                        // no portugues - e com a codificacao trocada o ã chega
+                        // ("Network Destination" no ingles, "Endere�o de rede"
+                        // no portugues - e com a codificacao trocada o � chega
                         // ate mangled). Vale a LINHA: se comeca com IP + mascara
                         // e rota, em qualquer idioma, em qualquer Windows. As
                         // outras linhas (interfaces, titulos, "Nenhum"/"None")

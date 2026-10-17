@@ -9,41 +9,49 @@
 
 * { margin:0; padding:0; box-sizing:border-box; }
 
-html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
+/* ---------------- o fundo da janela ----------------
+   O fundo e pintado AQUI, pelo proprio HTML, e nao pelo Windows.
+   Motivo: o Windows so pinta o fundo da Form uma unica vez, e como o
+   WebView2 e um controle por cima de tudo, o bitmap novo nunca chegava a
+   ser desenhado - o que ficava na tela era um desenho antigo, com a foto
+   do alien grande e fora de lugar. Mandando o navegador cobrir a area
+   inteira com "cover" (exatamente o que o mockup aprovado faz), a foto
+   fica sempre alinhada com a tela, em qualquer tamanho de janela.
+   A janela do Windows so pinta o fundo no plano B, quando o Runtime do
+   WebView2 nao existe e a tela volta a ser o WinForms de verdade. */
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  background-color:#05080a;
+  background-image:url('fundo.alien.jpg');
+  background-repeat:no-repeat;
+  background-size:cover;
+  background-position:center center;
+}
 body {
   display:flex; align-items:center; justify-content:center;
   font-family:"Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 
-/* ---------------- a janela ----------------
-   O fundo NAO e desenhado aqui: a janela do Windows ja pinta os 3 temas
-   (foto do alien, degrade escuro, foto do Goku com veu) e o WebView2 esta
-   transparente em cima dela. Pintar o fundo duas vezes fazia a tela
-   diferente do desenho e, com fundo opaco, o Chromium ligava o ClearType:
-   as letras saiam com franja vermelha e verde no fundo escuro. */
 #janela {
   width:100%; height:100%;
   display:flex; flex-direction:column;
   overflow:hidden;
   background:transparent;
   color:#e8f4f8; font-size:13px;
+  position:relative; z-index:1;   /* acima do veu do tema Goku */
 }
 
 /* ---------------- temas (SO AQUI) ----------------
    escuro = degrade rgb(12,24,28) -> rgb(4,10,12) sem foto
-   goku   = a foto do Goku com um veu preto 105/255 por cima (o mesmo
-            alfa que o MontarFundo do C# usa) */
+   goku   = a foto do Goku com um veu preto por cima. O arquivo vem no
+            style inline (aplicarTema) e o cover fica herdado daqui. */
 body.tema-escuro {
   background-image: none;
   background: linear-gradient(180deg, #0c181c 0%, #040a0c 100%);
 }
-body.tema-goku { background-image: none; background-color:#000; }
-body.tema-goku::before {
-  content:""; position:fixed; inset:0; z-index:-1;
-  background-repeat:no-repeat; background-size:cover; background-position:center;
-}
+body.tema-goku { background-color:#000; }
 body.tema-goku::after {
-  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
   background:rgba(0,0,0,.41);
 }
 

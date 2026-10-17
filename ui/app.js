@@ -85,10 +85,13 @@ function aplicarTema(chave) {
     c.style.backgroundImage = 'url("' + img.goku + '")';
     c.className = 'tema-goku';
   } else if (estado.tema === 'escuro') {
-    c.style.backgroundImage = 'none';
+    // VAZIO, e nao 'none': um background-image posto aqui no style tem
+    // prioridade sobre a classe, e 'none' apagava o degrade do CSS - o
+    // tema escuro continuava mostrando a foto do alien.
+    c.style.backgroundImage = '';
     c.className = 'tema-escuro';
   } else {
-    c.style.backgroundImage = img.fundo ? 'url("' + img.fundo + '")' : 'none';
+    c.style.backgroundImage = img.fundo ? 'url("' + img.fundo + '")' : '';
     c.className = 'tema-ets';
   }
   var s = document.getElementById('tema');
