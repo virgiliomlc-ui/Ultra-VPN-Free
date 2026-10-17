@@ -233,6 +233,13 @@ function aplicarServidores(d) {
       el.addEventListener('click', function () {
         selServidor(idx, el);
       });
+      // DUPLO CLIQUE = a troca rapida do programa antigo (lv.DoubleClick):
+      // escolhe o servidor da linha e liga; se ja estiver ligado, desliga
+      // e liga no outro
+      el.addEventListener('dblclick', function () {
+        selServidor(idx, el);
+        manda('conectarDireto', { indice: idx, ip: estado.servidores[idx].ip });
+      });
     })(parseInt(linhas[k].getAttribute('data-i'), 10), linhas[k]);
   }
   medirTrilho('cxLista', 'polegarLista', total);

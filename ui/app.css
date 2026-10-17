@@ -142,6 +142,7 @@ tbody td {
   color:#dff2f6; white-space:nowrap;
 }
 tbody tr.srv { cursor:pointer; }
+tbody tr.srv td { cursor:pointer; }
 tbody tr.srv:hover td { background:rgba(0,216,222,.10); }
 tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 .grupo td { color:#7fe9ee; font-weight:700; font-size:14px; padding-top:6px; }

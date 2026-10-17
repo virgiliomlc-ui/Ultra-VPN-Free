@@ -4195,6 +4195,28 @@ void MandarPaises()
                     case "conectarDesconectar":
                         if (connected) Desconectar(); else Conectar();
                         return;
+                    case "conectarDireto":
+                        {
+                            // DUPLO CLIQUE na linha: a troca rapida do
+                            // programa antigo (lv.DoubleClick). Escolhe o
+                            // servidor da linha e liga; se ja estiver ligado,
+                            // desliga e liga no outro.
+                            object vi; m.TryGetValue("indice", out vi);
+                            try
+                            {
+                                // o servidor da linha que foi clicada duas
+                                // vezes - o mesmo caminho que o clique simples
+                                // usa, para escolher country/city/ip/port
+                                object vip; m.TryGetValue("ip", out vip);
+                                var ip = Convert.ToString(vip);
+                                for (int i = 0; i < servers.Count; i++)
+                                    if (servers[i].IP == ip) { UltimoEscolhido = servers[i]; break; }
+                            }
+                            catch { }
+                            if (connected) { try { Desconectar(); } catch { } }
+                            Conectar();
+                            return;
+                        }
                     case "adicionarPrograma": AdicionarPrograma(null); return;
                     case "removerPrograma": RemoverProgramaSelecionado(); return;
                     case "desinstalar": Desinstalar(); return;
@@ -7178,12 +7200,48 @@ Bitmap MontarFundoCover()
         // outra thread). No Windows 10 a sessao inteira caia assim.
         int conectando = 0;
 
+        // marca na lista do WinForms o servidor que a tela em HTML escolheu
+        void MarcarSelecionado(Servidor alvo)
+        {
+            try
+            {
+                lv.BeginUpdate();
+                lv.SelectedItems.Clear();
+                int achou = -1;
+                for (int i = 0; i < lv.Items.Count; i++)
+                {
+                    var tg = lv.Items[i].Tag as Servidor;
+                    if (tg != null && tg.IP == alvo.IP) { lv.Items[i].Selected = true; lv.EnsureVisible(i); achou = i; break; }
+                }
+                lv.EndUpdate();
+            }
+            catch { }
+        }
+
         void Conectar()
         {
             if (connected) { Log("J\u00e1 est\u00e1 conectado."); return; }
             // ainda estou conferindo as fontes: clicar agora seria escolher
             // um servidor que pode nem estar de pe
             if (saindo || disposing) return;
+
+            // COM A TELA EM HTML a escolha chega pelo UltimoEscolhido (o
+            // clique na tabela), e nao pela selecao da lista do WinForms -
+            // que fica escondida. O FluxoConectar() so sabe ler a lista,
+            // entao aqui a escolha e transportada para la. Sem isto o
+            // CONECTAR e o duplo clique paravam em "Escolha um servidor na
+            // lista primeiro".
+            try
+            {
+                var escolhido = UltimoEscolhido;
+                if (escolhido != null)
+                {
+                    if (InvokeRequired) BeginInvoke((Action)delegate { MarcarSelecionado(escolhido); });
+                    else MarcarSelecionado(escolhido);
+                }
+            }
+            catch { }
+
             int nApps = appList.Count;
             if (!fullTunnel && nApps == 0)
             {
@@ -7290,21 +7348,36 @@ Bitmap MontarFundoCover()
 
         void FluxoConectar()
         {
-            Servidor s = null;
-            BeginInvoke((Action)delegate
+            // A ESCOLHA VEM DO UltimoEscolhido, e nao da selecao da lista do
+            // WinForms. Com a tela em HTML o clique na tabela so preenche o
+            // UltimoEscolhido, e a lista do WinForms fica escondida numa
+            // janela de reserva - marcar Selected nela nao gruda (medido:
+            // itens=13, achou=0, marcados=0). Ler a lista escondida fazia o
+            // CONECTAR e o duplo clique pararem em "Escolha um servidor".
+            Servidor s = UltimoEscolhido;
+            if (s == null)
             {
-                // sem escolha na tela: vai no primeiro da lista, que e o de
-                // melhor ping. Vale tanto para o boot quanto para o clique.
-                if (lv.SelectedItems.Count == 0 && lv.Items.Count > 0)
+                BeginInvoke((Action)delegate
                 {
-                    try { lv.Items[0].Selected = true; lv.EnsureVisible(0); } catch { }
-                }
-                if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag;
-            });
-            // espera a leitura da selecao
-            for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
-            BeginInvoke((Action)delegate { if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag; });
-            for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
+                    // sem escolha na tela: vai no primeiro da lista, que e o de
+                    // melhor ping. Vale tanto para o boot quanto para o clique.
+                    if (lv.SelectedItems.Count == 0 && lv.Items.Count > 0)
+                    {
+                        try { lv.Items[0].Selected = true; lv.EnsureVisible(0); } catch { }
+                    }
+                    if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag;
+                });
+                // espera a leitura da selecao
+                for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
+                BeginInvoke((Action)delegate { if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag; });
+                for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
+            }
+            else
+            {
+                // tela em HTML: garante que a lista do WinForms aponte para o
+                // mesmo servidor (o plano B usa a lista de verdade)
+                try { MarcarSelecionado(s); } catch { }
+            }
             if (s == null)
             {
                 Log("Escolha um servidor na lista primeiro (ou clique em Atualizar).");
