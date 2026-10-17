@@ -134,9 +134,15 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
 
 /* ---------- programas ---------- */
 #rotProgramas { padding:7px 18px 2px; color:#9fd4dd; flex:0 0 auto; }
-#gradeBaixo { display:flex; gap:16px; padding:2px 18px 0; flex:0 0 auto; height:118px; }
+/* min-height:0 e OBRIGATORIO nestas caixas. Numa coluna flex, o
+   min-height:auto padrao quer dizer "nunca menor que o conteudo", e ele
+   ganha do flex-basis: sem isso a caixa do log crescia com cada linha nova
+   (chegou a 444 px), empurrava a tabela de servidores para 0 px e nunca
+   aparecia barra vertical nem o ET. A #cxLista ja tinha min-height:0 no
+   proprio style, por isso ela sofria e as outras nao. */
+#gradeBaixo { display:flex; gap:16px; padding:2px 18px 0; flex:0 0 118px; min-height:0; height:118px; }
 #cxProg {
-  flex:1; background:rgba(4,16,20,.45);
+  flex:1; min-height:0; background:rgba(4,16,20,.45);
   border:1px solid rgba(0,216,222,.28); border-radius:2px;
 }
 #cxProg .rolagem { padding:5px 17px 5px 5px; }
@@ -181,7 +187,7 @@ tbody tr.srv.sel td { background:rgba(0,216,222,.17); }
    das 7 linhas que cabem na janela - 118 px = 7 linhas de 17. */
 #rotLog { padding:8px 18px 2px; color:#bcd8de; flex:0 0 auto; }
 #log {
-  margin:2px 18px 12px; padding:8px; flex:0 0 118px;
+  margin:2px 18px 12px; padding:8px; flex:0 0 118px; min-height:0;
   background:rgba(2,10,13,.55); border:1px solid rgba(0,216,222,.22);
   border-radius:2px; color:#cfe6ec; font-size:12px; line-height:1.42;
   font-family:Consolas,"Courier New",monospace;
