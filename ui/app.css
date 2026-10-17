@@ -61,6 +61,13 @@ thead th:hover { color:#7ff3f6; }
 thead th.ord { color:#7ff3f6; }
 thead th .seta { font-size:10px; }
 
+/* ---------- tabela de servidores ----------
+   Ali nao se seleciona nem se copia nada: e a lista em que se clica para
+   escolher o servidor (o duplo clique liga). O texto marcado atraves das
+   linhas atrapalhava, e o arrasto de selecao cancelava cliques. O log
+   continua selecionavel de proposito - dali da para copiar mensagem. */
+#cxLista, #cxLista * { -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none; }
+
 /* ---------- cabecalho ---------- */
 #cabecalho { display:flex; align-items:flex-start; gap:14px; padding:10px 18px 0; flex:0 0 auto; }
 #logo {
