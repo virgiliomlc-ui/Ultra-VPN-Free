@@ -4015,6 +4015,9 @@ void MandarPaises()
                         { "ip", s.IP },
                         { "porta", s.Port },
                         { "pais", Dados.GetCountryName(s.ISO) },
+                        // o ISO vai junto: o filtro de pais acontece na TELA
+                        // (e nao aqui), e a tela so tem o nome, nao o codigo
+                        { "iso", s.ISO },
                         { "cidade", cid },
                         { "ping", s.Measured },
                         { "vel", s.Speed },

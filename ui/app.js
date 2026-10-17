@@ -188,18 +188,51 @@ document.addEventListener('click', function (ev) {
   manda('mudarOrdem', { col: parseInt(th.getAttribute('data-col'), 10) });
 });
 
+/* ---------------- filtro da tabela ----------------
+   O programa manda a lista TODA e quem filtra e a tela, para o clique ser
+   instantaneo:
+     - pais em "Todos os paises" -> todos; escolhendo um, so aquele
+     - tunel em "UDP e TCP (automatico)" -> todos; escolhendo UDP, so UDP
+   O filtro do tunel espelha o do programa antigo: servidor que fala "os
+   dois" aparece nas duas escolhas; servidor que fala so um so aparece
+   quando esse e o escolhido. */
+function filtroPais() {
+  var el = document.getElementById('pais');
+  return el ? (el.value || '') : '';
+}
+function filtroTunel() {
+  var el = document.getElementById('tunel');
+  return el ? (el.value || 'auto') : 'auto';
+}
+function servidoresVisiveis() {
+  var iso = filtroPais();
+  var tun = filtroTunel().toUpperCase();
+  var fora = [];
+  for (var i = 0; i < estado.servidores.length; i++) {
+    var s = estado.servidores[i];
+    var passa = true;
+    if (iso && String(s.iso || '') !== iso) passa = false;
+    if (passa && (tun === 'UDP' || tun === 'TCP')) {
+      var p = String(s.proto || '').toUpperCase();
+      if (p && p !== 'BOTH' && p !== 'AUTO' && p !== tun) passa = false;
+    }
+    if (passa) fora.push(i);
+  }
+  return fora;
+}
+
 function aplicarServidores(d) {
   estado.servidores = d.lista || [];
   estado.ordemCol = (typeof d.ordemCol === 'undefined' || d.ordemCol === null) ? -1 : d.ordemCol;
   estado.ordemCresc = !!d.ordemCresc;
   marcarColunaOrdenada();
-  var total = estado.servidores.length;
-  // nao escreve a linha direto: quem escreve e mostrarLinhaConta()
-  mostrarLinhaConta();
+  var idxs = servidoresVisiveis();
+  var total = idxs.length;
+  mostrarLinhaConta(total);
 
   var velocidadeMax = 1;
-  for (var i = 0; i < total; i++) {
-    if (estado.servidores[i].vel > velocidadeMax) velocidadeMax = estado.servidores[i].vel;
+  for (var j = 0; j < idxs.length; j++) {
+    if (estado.servidores[idxs[j]].vel > velocidadeMax) velocidadeMax = estado.servidores[idxs[j]].vel;
   }
 
   var html = '';
@@ -208,7 +241,8 @@ function aplicarServidores(d) {
   if (total > 0) {
     html += '<tr class="grupo"><td>América do Sul</td><td></td><td></td><td></td><td></td></tr>';
   }
-  for (var i = 0; i < total; i++) {
+  for (var j = 0; j < idxs.length; j++) {
+    var i = idxs[j];
     var s = estado.servidores[i];
     var nome = String(s.pais || '');
     var cid = String(s.cidade || '').trim();
@@ -242,6 +276,11 @@ function aplicarServidores(d) {
     })(parseInt(linhas[k].getAttribute('data-i'), 10), linhas[k]);
   }
   medirTrilho('cxLista', 'polegarLista', total);
+}
+
+// so redesenha a tabela, sem esperar o programa mandar nada
+function redesenharTabela() {
+  aplicarServidores({ lista: estado.servidores, ordemCol: estado.ordemCol, ordemCresc: estado.ordemCresc });
 }
 
 function selServidor(idx, el) {
@@ -393,13 +432,19 @@ function setConectado(conectado, servidor, endereco) {
 
 // a linha de cima mostra quantos servidores ha. Quem escreve nela e esta
 // funcao, para o botao e a lista nunca brigarem pelo mesmo lugar.
-function mostrarLinhaConta() {
+function mostrarLinhaConta(quantos) {
   var linha = document.getElementById('conta');
   if (!linha) return;
-  var t = (estado.servidores || []).length;
-  linha.textContent = t ? (t + (t === 1 ? ' servidor na América do Sul | 1 mostrado'
-                                   : ' servidores na América do Sul | ' + t + ' mostrados'))
-                        : 'carregando servidores...';
+  var t = (typeof quantos === 'number') ? quantos : (estado.servidores || []).length;
+  if (!t) {
+    // filtro que nao achou nada: diz o que happened em vez de sumir
+    linha.textContent = (estado.servidores || []).length
+      ? 'nenhum servidor com esse filtro'
+      : 'carregando servidores...';
+    return;
+  }
+  linha.textContent = t + (t === 1 ? ' servidor na América do Sul | 1 mostrado'
+                                   : ' servidores na América do Sul | ' + t + ' mostrados');
 }
 
 /* ---------------- botoes ---------------- */
@@ -419,9 +464,12 @@ ligar('btnRemoveProg', 'removerPrograma');
 ligar('btnDesinst', 'desinstalar');
 
 document.getElementById('pais').addEventListener('change', function () {
+  // a tabela filtra NA HORA; o programa so precisa saber para a conexao
+  redesenharTabela();
   manda('mudarPais', { iso: this.value });
 });
 document.getElementById('tunel').addEventListener('change', function () {
+  redesenharTabela();
   manda('mudarProtocolo', { protocolo: this.value });
 });
 document.getElementById('tema').addEventListener('change', function () {
