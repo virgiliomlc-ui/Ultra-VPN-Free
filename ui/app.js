@@ -460,7 +460,14 @@ ligar('btnMax', 'maximizar');
 ligar('btnFechar', 'fechar');
 ligar('conectar', 'conectarDesconectar');
 ligar('btnAddProg', 'adicionarPrograma');
-ligar('btnRemoveProg', 'removerPrograma');
+// Remover: manda QUE programa esta marcado na lista (a linha clicada)
+var bRem = document.getElementById('btnRemoveProg');
+if (bRem) bRem.addEventListener('click', function () {
+  manda('removerPrograma', { indice: progSel });
+  progSel = -1;
+  var ant = document.querySelector('#listaProg .prog.sel');
+  if (ant) ant.classList.remove('sel');
+});
 ligar('btnDesinst', 'desinstalar');
 
 document.getElementById('pais').addEventListener('change', function () {

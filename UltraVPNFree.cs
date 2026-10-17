@@ -3117,6 +3117,7 @@ public static string UrbanGetServers(string accsToken)
         List<Servidor> urbanServers = new List<Servidor>();
         List<Servidor> servers = new List<Servidor>();
         List<Programa> appList = new List<Programa>();
+        int programaSelecionadoWeb = -1;   // indice do programa marcado na tela web
         // icones dos programas da lista, por caminho: extrair o icone do .exe a
         // cada repaint trava a lista, entamo guarda em cache
         readonly Dictionary<string, Icon> cacheIcones = new Dictionary<string, Icon>();
@@ -3498,14 +3499,7 @@ public static string UrbanGetServers(string accsToken)
             btnRemove.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnRemove.Click += delegate
             {
-                var sel = lbApps.SelectedIndex;
-                if (sel < 0) { Log("Selecione um programa da lista para remover."); return; }
-                var nome = appList[sel].Name;
-                appList = appList.Where(a => a.Name != nome).ToList();
-                AtualizarListaProgramas();
-                SalvarEstado();
-                Log(nome + " saiu da lista.");
-                if (connected) { try { SincronizarRotas(); } catch { } }
+                RemoverProgramaSelecionado(-1);
             };
             Controls.Add(btnRemove);
 
@@ -4332,8 +4326,28 @@ void MandarPaises()
                             Conectar();
                             return;
                         }
-                    case "adicionarPrograma": AdicionarPrograma(null); return;
-                    case "removerPrograma": RemoverProgramaSelecionado(); return;
+                    case "adicionarPrograma":
+                        {
+                            var escolhido = EscolherPrograma();
+                            if (escolhido != null) AdicionarPrograma(escolhido);
+                            return;
+                        }
+                    case "escolherPrograma":
+                        {
+                            // a tela marcou um programa na lista (clique na linha)
+                            object vi; m.TryGetValue("indice", out vi);
+                            try { programaSelecionadoWeb = vi == null ? -1 : Convert.ToInt32(vi); }
+                            catch { programaSelecionadoWeb = -1; }
+                            return;
+                        }
+                    case "removerPrograma":
+                        {
+                            object vi; m.TryGetValue("indice", out vi);
+                            int idxWeb = -1;
+                            try { if (vi != null) idxWeb = Convert.ToInt32(vi); } catch { }
+                            RemoverProgramaSelecionado(idxWeb);
+                            return;
+                        }
                     case "desinstalar": Desinstalar(); return;
                     case "minimizar": WindowState = FormWindowState.Minimized; return;
                     case "maximizar":
@@ -4385,18 +4399,28 @@ void MandarPaises()
             catch { return ""; }
         }
 
-        // "Remover" da tela: tira o programa marcado
-        void RemoverProgramaSelecionado()
+        // "Remover" da tela: tira o programa marcado. O indice pode vir da
+        // tela web (clique na linha), da memoria da ultima marcacao, ou - no
+        // formulario antigo - do SelectedIndex da lista. Sem marcacao,
+        // AVISA em vez de sumir com nada.
+        void RemoverProgramaSelecionado(int idxWeb)
         {
             try
             {
-                if (lbApps == null || lbApps.SelectedIndex < 0) return;
-                var idx = lbApps.SelectedIndex;
-                if (idx < 0 || idx >= appList.Count) return;
+                int idx = -1;
+                if (idxWeb >= 0 && idxWeb < appList.Count) idx = idxWeb;
+                else if (programaSelecionadoWeb >= 0 && programaSelecionadoWeb < appList.Count)
+                    idx = programaSelecionadoWeb;
+                else if (lbApps != null && lbApps.SelectedIndex >= 0 && lbApps.SelectedIndex < appList.Count)
+                    idx = lbApps.SelectedIndex;
+                if (idx < 0) { Log("Selecione um programa da lista para remover."); return; }
+                var nome = appList[idx].Name;
                 appList.RemoveAt(idx);
+                programaSelecionadoWeb = -1;
                 try { SalvarEstado(); } catch { }
                 AtualizarListaProgramas();
-                EnviarProgramas();
+                Log(nome + " saiu da lista.");
+                if (connected) { try { SincronizarRotas(); } catch { } }
             }
             catch { }
         }
@@ -9452,103 +9476,220 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         string EscolherPrograma()
         {
             var cands = Candidatos();
-            var items = cands.Keys.OrderBy(p => cands[p]).ThenBy(p => p).ToList();
+            var items = cands.Keys
+                .Where(p =>
+                {
+                    var fn = Path.GetFileName(p) ?? "";
+                    if (String.Equals(p, Store.ExePath, StringComparison.OrdinalIgnoreCase)) return false;
+                    if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) return false;
+                    if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) return false;
+                    if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) return false;
+                    return true;
+                })
+                .OrderBy(p => cands[p], StringComparer.OrdinalIgnoreCase)
+                .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .Take(500)
+                .ToList();
 
             var dlg = new Form();
             dlg.Text = "Escolha o programa";
-            dlg.Size = new Size(660, 500);
+            dlg.Size = new Size(780, 640);
             dlg.StartPosition = FormStartPosition.CenterParent;
             dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
             dlg.MinimizeBox = false;
             dlg.MaximizeBox = false;
             dlg.ShowInTaskbar = false;
             dlg.Font = new Font("Segoe UI", 9);
+            dlg.BackColor = Color.FromArgb(4, 13, 15);
 
             var lbl1 = new Label();
-            lbl1.Text = "Programas achados neste PC (clique duas vezes para escolher):";
+            lbl1.Text = "Programas instalados neste PC - duplo clique no icone escolhe:";
+            lbl1.ForeColor = CorTexto;
             lbl1.Location = new Point(12, 12);
-            lbl1.Size = new Size(620, 20);
+            lbl1.Size = new Size(740, 20);
             dlg.Controls.Add(lbl1);
 
-            var lb = new ListBox();
-            lb.Location = new Point(12, 34);
-            lb.Size = new Size(624, 268);
-            lb.IntegralHeight = false;
-            lb.Items.AddRange(items.Select(p => (object)(cands[p] + "    " + p)).ToArray());
-            dlg.Controls.Add(lb);
+            var filtro = new TextBox();
+            filtro.Location = new Point(12, 34);
+            filtro.Size = new Size(740, 26);
+            dlg.Controls.Add(filtro);
+
+            var grade = new ListView();
+            grade.View = View.LargeIcon;
+            grade.Location = new Point(12, 66);
+            grade.Size = new Size(740, 380);
+            grade.MultiSelect = false;
+            grade.HideSelection = true;
+            grade.ShowItemToolTips = true;
+            grade.BackColor = Color.FromArgb(4, 13, 15);
+            grade.ForeColor = CorTexto;
+            var icones = new ImageList();
+            icones.ImageSize = new Size(48, 48);
+            icones.ColorDepth = ColorDepth.Depth32Bit;
+            grade.LargeImageList = icones;
+            dlg.Controls.Add(grade);
+
+            // A grade ja abre CHEIA de nomes (rapido). Os icones entram por
+            // tras: extraidos FORA da tela e entregues aos poucos, icone por
+            // icone - a janela nunca fica presa esperando o disco.
+            var mapa = new Dictionary<string, ListViewItem>(StringComparer.OrdinalIgnoreCase);
+            var todosDaGrade = new List<ListViewItem>();
+            foreach (var p in items)
+            {
+                var it = new ListViewItem(cands[p]);
+                it.Tag = p;
+                it.ToolTipText = p;
+                it.ImageIndex = -1;
+                grade.Items.Add(it);
+                todosDaGrade.Add(it);
+                mapa[p] = it;
+            }
+            var prontos = new List<object[]>();    // [caminho, icone]
+            var extrator = new Thread(new ThreadStart(delegate
+            {
+                foreach (var p in items)
+                {
+                    Icon ic = null;
+                    try { ic = Icon.ExtractAssociatedIcon(p); } catch { }
+                    if (ic == null) continue;
+                    try { lock (prontos) prontos.Add(new object[] { p, (Icon)ic.Clone() }); }
+                    catch { try { ic.Dispose(); } catch { } }
+                }
+            }));
+            extrator.IsBackground = true;
+            var pintor = new System.Windows.Forms.Timer();
+            pintor.Interval = 80;
+            pintor.Tick += delegate
+            {
+                try
+                {
+                    List<object[]> lote;
+                    lock (prontos)
+                    {
+                        if (prontos.Count == 0) return;
+                        lote = prontos.Take(8).ToList();
+                        prontos.RemoveRange(0, lote.Count);
+                    }
+                    foreach (var par in lote)
+                    {
+                        var cam = (string)par[0];
+                        ListViewItem it;
+                        if (!mapa.TryGetValue(cam, out it)) continue;
+                        try
+                        {
+                            using (var orig = ((Icon)par[1]).ToBitmap())
+                            using (var b = new Bitmap(48, 48))
+                            {
+                                using (var g = Graphics.FromImage(b))
+                                {
+                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                    g.Clear(Color.Transparent);
+                                    g.DrawImage(orig, new Rectangle(0, 0, 48, 48));
+                                }
+                                icones.Images.Add(cam, b);
+                            }
+                            it.ImageIndex = icones.Images.IndexOfKey(cam);
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            };
 
             var lbl2 = new Label();
-            lbl2.Text = "Ou digite/escolha o caminho do arquivo .exe:";
-            lbl2.Location = new Point(12, 314);
-            lbl2.Size = new Size(620, 20);
+            lbl2.Text = "Ou digite o caminho do arquivo .exe:";
+            lbl2.ForeColor = CorTexto;
+            lbl2.Location = new Point(12, 458);
+            lbl2.Size = new Size(740, 20);
             dlg.Controls.Add(lbl2);
 
             var txt = new TextBox();
-            txt.Location = new Point(12, 336);
-            txt.Size = new Size(624, 26);
+            txt.Location = new Point(12, 480);
+            txt.Size = new Size(740, 26);
             dlg.Controls.Add(txt);
 
             var lblMsg = new Label();
-            lblMsg.Location = new Point(12, 370);
-            lblMsg.Size = new Size(624, 20);
+            lblMsg.Location = new Point(12, 512);
+            lblMsg.Size = new Size(740, 20);
             lblMsg.ForeColor = Color.Firebrick;
             dlg.Controls.Add(lblMsg);
 
+            var btnOk = new Button();
+            btnOk.Text = "Escolher";
+            btnOk.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+            btnOk.Location = new Point(500, 546);
+            btnOk.Size = new Size(120, 32);
+            btnOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            dlg.Controls.Add(btnOk);
+
             var btnCancel = new Button();
             btnCancel.Text = "Cancelar";
-            btnCancel.Location = new Point(516, 404);
+            btnCancel.Location = new Point(632, 546);
             btnCancel.Size = new Size(120, 32);
             btnCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             dlg.Controls.Add(btnCancel);
 
-            var btnOk = new Button();
-            btnOk.Text = "Escolher";
-            btnOk.Location = new Point(388, 404);
-            btnOk.Size = new Size(120, 32);
-            btnOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            btnOk.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-            dlg.Controls.Add(btnOk);
-
             string resultado = null;
-            btnOk.Click += delegate
+            Action escolher = delegate
             {
-                var p = (txt.Text ?? "").Trim();
+                var p = "";
+                try { if (grade.SelectedItems.Count > 0) p = (string)grade.SelectedItems[0].Tag; } catch { }
+                if (String.IsNullOrEmpty(p)) p = (txt.Text ?? "").Trim();
                 if (p == "") { lblMsg.Text = "Escolha um programa na lista ou digite o caminho do .exe."; return; }
                 if (!File.Exists(p)) { lblMsg.Text = "Esse arquivo n\u00e3o existe. Confira o caminho."; return; }
                 resultado = p;
                 dlg.DialogResult = DialogResult.OK;
                 dlg.Close();
             };
+            btnOk.Click += delegate { escolher(); };
             btnCancel.Click += delegate { resultado = null; dlg.DialogResult = DialogResult.Cancel; dlg.Close(); };
-            lb.SelectedIndexChanged += delegate
+            grade.SelectedIndexChanged += delegate
             {
-                if (lb.SelectedIndex >= 0 && lb.SelectedIndex < items.Count)
-                { txt.Text = items[lb.SelectedIndex]; lblMsg.Text = ""; }
-            };
-            lb.DoubleClick += delegate
-            {
-                if (lb.SelectedIndex >= 0)
+                try
                 {
-                    txt.Text = items[lb.SelectedIndex];
-                    btnOk.PerformClick();
+                    if (grade.SelectedItems.Count > 0)
+                    { txt.Text = (string)grade.SelectedItems[0].Tag; lblMsg.Text = ""; }
                 }
+                catch { }
+            };
+            grade.DoubleClick += delegate { escolher(); };
+            // filtrar pelo nome enquanto digita (a grade e reconstruida so
+            // com quem bate com o texto)
+            filtro.TextChanged += delegate
+            {
+                try
+                {
+                    grade.BeginUpdate();
+                    grade.Items.Clear();
+                    var q = (filtro.Text ?? "").Trim();
+                    foreach (var it in todosDaGrade)
+                        if (String.IsNullOrEmpty(q) ||
+                            it.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                            grade.Items.Add(it);
+                }
+                catch { }
+                finally { try { grade.EndUpdate(); } catch { } }
             };
             dlg.Shown += delegate
             {
-                // a lista do seletor no tema escuro (barra de rolagem inclusive)
+                // grade no tema escuro (barra de rolagem inclusive)
                 try
                 {
-                    lb.BackColor = Color.FromArgb(4, 13, 15);
-                    lb.ForeColor = CorTexto;
-                    Nativo.SetWindowTheme(lb.Handle, "DarkMode_Explorer", null);
-                    Nativo.EscurecerScroll(lb.Handle);
+                    Nativo.SetWindowTheme(grade.Handle, "DarkMode_Explorer", null);
+                    Nativo.EscurecerScroll(grade.Handle);
                 }
                 catch { }
-                if (items.Count > 0) lb.SelectedIndex = 0;
-                txt.Focus();
+                try { extrator.Start(); pintor.Start(); } catch { }
+                filtro.Focus();
+            };
+            dlg.FormClosed += delegate
+            {
+                try { pintor.Stop(); } catch { }
+                try { icones.Dispose(); } catch { }
             };
 
             dlg.ShowDialog(this);
+            try { pintor.Stop(); } catch { }
             dlg.Dispose();
             return resultado;
         }
