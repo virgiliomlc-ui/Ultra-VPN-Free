@@ -6372,6 +6372,78 @@ Bitmap MontarFundoCover()
         }
 
         // ============================================================
+        //  CONFERENCIA DE CONEXAO REAL (ao abrir e a cada 10 min)
+        // ============================================================
+        //  Depois de buscar as fontes em TODAS elas (VPN Gate, espelho,
+        //  lista publica, telexy, hunt, VPNBook e Urban), o programa
+        //  testa a porta de cada servidor da America do Sul: aperto de
+        //  mao no TCP e PING/PONG do proprio OpenVPN no UDP. Quem
+        //  responde E tem .ovpn utilizavel sobe para o topo, com o
+        //  tempo real do aperto de mao na coluna "Seu ping". Quem nao
+        //  respondeu fica no fim da lista - nunca some (perda de pacote
+        //  e UDP fechado nao significa servidor fora do ar) e nunca
+        //  fica em primeiro lugar. Se quase ninguem responder, a lista
+        //  mantem todos para o usuario poder tentar.
+        void VerificarConexaoReal()
+        {
+            try { if (saindo || disposing) return; } catch { return; }
+            var alvo = new List<Servidor>();
+            try { foreach (var s in servers) if (s != null) alvo.Add(s); }
+            catch { return; }
+            if (alvo.Count == 0) return;
+
+            // 1) quem responde AGORA (uma janela de 1,4 s para todos)
+            Dictionary<string, int> rtt;
+            try { rtt = Rede.MedirRtts(alvo); } catch { return; }
+            if (rtt == null) return;
+
+            // 2) quem tem .ovpn que o OpenVPN consegue usar
+            var cfgBoa = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in alvo)
+            {
+                try
+                {
+                    if (s == null || String.IsNullOrEmpty(s.IP)) continue;
+                    bool temCfg = s.OvpnOk || !String.IsNullOrEmpty(s.Cfg) || !String.IsNullOrEmpty(s.CfgUrl);
+                    if (!temCfg) { try { temCfg = OvpnTextoBom(Store.ReadCfgCache(s.IP)); } catch { } }
+                    if (temCfg) cfgBoa.Add(s.IP);
+                }
+                catch { }
+            }
+
+            // 3) monta a lista final: os que funcionam em primeiro, do
+            //    mais rapido para o mais lento; o resto vai para o fim
+            var verificados = new List<Servidor>();
+            var outros = new List<Servidor>();
+            foreach (var s in alvo)
+            {
+                int ms;
+                bool respondeu = rtt.TryGetValue(s.IP, out ms) && ms >= 0;
+                s.Measured = respondeu ? ms : -1;
+                if (respondeu && cfgBoa.Contains(s.IP)) verificados.Add(s);
+                else outros.Add(s);
+            }
+            verificados.Sort(delegate (Servidor a, Servidor b)
+            { return a.Measured.CompareTo(b.Measured); });
+
+            var nova = new List<Servidor>();
+            nova.AddRange(verificados);
+            if (verificados.Count < 3) nova.AddRange(outros);
+            if (nova.Count == 0) return;
+
+            try
+            {
+                servers = nova;
+                if (sortCol < 0) OrdenarPadrao();
+                AtualizarLista();
+                EnviarLista();
+                Log("Conexao conferida: " + verificados.Count + " de " + alvo.Count
+                    + " servidores responderam agora.");
+            }
+            catch { }
+        }
+
+        // ============================================================
         //  ATUALIZACAO DAS FONTES (ao abrir e a cada 10 min)
         // ============================================================
         // Aqui so ENTRA servidor novo e se atualiza ip/porta. NADA e tirado da
@@ -6439,6 +6511,12 @@ Bitmap MontarFundoCover()
                         PrepararOvpnDosNovos();
                     }
                     catch { }
+
+                    // ---------- 5) so entra na lista quem tem conexao certa ----------
+                    // Testa a porta de todos os servidores da America do Sul e
+                    // monta a lista so com os que responderam agora (os outros
+                    // ficam no fim, sem perder ninguem).
+                    try { VerificarConexaoReal(); } catch { }
 
 
                 }
