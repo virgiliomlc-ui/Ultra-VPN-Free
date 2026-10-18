@@ -43,7 +43,7 @@ namespace UltraVPN
     // programa e de arquivo unico, elas nao estao do lado do exe e o JIT
     // nao as acha -> o programa quebraria na hora de abrir a tela.
     //
-    // Esta classe fica DE PROP�SITO sem nenhuma referencia a tipo do
+    // Esta classe fica DE PROPOSITO sem nenhuma referencia a tipo do
     // WebView2: se ela citasse WebView2, o JIT precisaria da DLL antes
     // do AssemblyResolve existir, e oprograma cairia antes de chance de
     // tentar qualquer coisa. Aqui so entra System.Reflection.
@@ -78,7 +78,7 @@ namespace UltraVPN
             catch { }
         }
 
-        // Chamar no come�o do Main, ANTES de qualquer coisa tocar no
+        // Chamar no comeco do Main, ANTES de qualquer coisa tocar no
         // WebView2. Devolve false quando nao deu: nesse caso o programa
         // continua funcionando com a tela antiga do WinForms.
         public static bool Instalar()
@@ -403,7 +403,7 @@ namespace UltraVPN
                     // cada navegacao. Foi medido: a tela ficava pronta em
                     // 3,2 s e o documento inteiro levava 5 ms - os 2 s eram
                     // so a espera do navegador acordar. A janela deste
-                    // programa nao temcomo ficar escondida, entao nao ha
+                    // programa nao tem como ficar escondida, entao nao ha
                     // o que economizar aqui.
                     "--disable-backgrounding-occluded-windows " +
                     "--disable-renderer-backgrounding " +
@@ -486,7 +486,7 @@ namespace UltraVPN
                         // pintando pelo MontarFundo.
                         try
                         {
-                            // OPOQUE, e nao transparente. Com DefaultBackgroundColor
+                            // OPACO, e nao transparente. Com DefaultBackgroundColor
                             // = Transparente o Chromium NAO pinta o fundo da pagina:
                             // ele deixa o fundo da janela do Windows aparecer por
                             // tras, e era esse o fundo grande e fora de lugar. O
@@ -2552,6 +2552,39 @@ public static string UrbanGetServers(string accsToken)
             catch { }
         }
 
+        // VARIOS comandos de uma vez, num processo so. Abrir um programa do
+        // Windows custa 30-80 ms; com 20 rotas de tunel eram quase 2 s
+        // jogados fora DEPOIS do "Conectado" aparecer. Aqui o cmd.exe roda a
+        // lista inteira de uma vez.
+        public static void RunCmdLote(List<string> comandos)
+        {
+            if (comandos == null || comandos.Count == 0) return;
+            try
+            {
+                if (comandos.Count == 1) { RunCmd("cmd", "/c " + comandos[0]); return; }
+                var sb = new System.Text.StringBuilder("/c ");
+                for (int i = 0; i < comandos.Count; i++)
+                {
+                    if (i > 0) sb.Append(" & ");
+                    sb.Append(comandos[i]);
+                }
+                var psi = new ProcessStartInfo("cmd", sb.ToString())
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    p.StandardOutput.ReadToEnd();
+                    p.StandardError.ReadToEnd();
+                    p.WaitForExit(25000);
+                }
+            }
+            catch { }
+        }
+
         public static string MascaraDePrefixo(string prefixo)
         {
             // "1.2.3.4" -> /32 ; "104.29.128.0/19" -> 255.255.224.0
@@ -2652,7 +2685,7 @@ public static string UrbanGetServers(string accsToken)
         // A coluna do IP:porta e colorida pelo proprio ListView (ForeColor do
         // subitem, verde-neon). Nao ha pintura manual aqui de proposito: a
         // lista esta em OwnerDraw, o Windows pinta a linha inteira e uma
-        // repintada por cima via NM_CUSTOMDRAW sao fora � o item ficava
+        // repintada por cima via NM_CUSTOMDRAW sao fora - o item ficava
         // sem pintar.
         void Grupo(IntPtr hdc, IntPtr id)
         {
@@ -3917,7 +3950,7 @@ public static string UrbanGetServers(string accsToken)
             Shown += delegate { AoAbrirJanela(); };
             Load += delegate
             {
-                // a lista ja conferida do ultimo ciclo entra PRIMEITO, antes
+                // a lista ja conferida do ultimo ciclo entra PRIMEIRO, antes
                 // de qualquer busca: o usuario ve na hora a ultima lista boa
                 // (a que os servidores responderam), e ela volta a ser
                 // conferida assim que o programa atualiza as fontes
@@ -3958,11 +3991,11 @@ public static string UrbanGetServers(string accsToken)
 
                 // ============================================================
                 //  TELA EM WEBVIEW2
-                // S� aqui: antes do Load a janela ainda n�o tem handle, e o
-                // WebView2 (que � um controle Windows de verdade) n�o pode ser
+                // So aqui: antes do Load a janela ainda nao tem handle, e o
+                // WebView2 (que e um controle Windows de verdade) nao pode ser
                 // criado. A janela continua sendo a mesma (form, bandeja,
-                // �cone); o que muda � que o miolo vira HTML. Se o WebView2
-                // n�o entrar (PC sem o Runtime), o desenho antigo continua.
+                // icone); o que muda e que o miolo vira HTML. Se o WebView2
+                // nao entrar (PC sem o Runtime), o desenho antigo continua.
                 // ============================================================
                 // A tela em WebView2 ja foi ligando em LigarTela(), no construtor,
                 // porque a janela so aparece depois que a tela esta pronta.
@@ -4637,7 +4670,7 @@ void MandarPaises()
                 if (a == null || String.IsNullOrEmpty(a.Name)) continue;
                 appList.Add(new Programa { Name = a.Name, Path = a.Path, Domains = a.Domains ?? new List<string>() });
             }
-            // adiciona o Discord como programa padr�o se n�o estiver na lista
+            // adiciona o Discord como programa padrao se nao estiver na lista
             if (!appList.Any(a => String.Equals(a.Name, "Discord", StringComparison.OrdinalIgnoreCase)))
             {
                 var caminhoDiscord = AcharCaminhoDiscord();
@@ -4647,7 +4680,7 @@ void MandarPaises()
                         ? Dados.AppPresets["Discord"].ToList()
                         : new List<string>();
                     appList.Add(new Programa { Name = "Discord", Path = caminhoDiscord, Domains = domains });
-                    Log("Discord adicionado como programa padr�o do tunel: " + caminhoDiscord);
+                    Log("Discord adicionado como programa padr\u00e3o do tunel: " + caminhoDiscord);
                 }
             }
             // portas aprendidas
@@ -4767,7 +4800,7 @@ void MandarPaises()
             if (estavaNoFim) lbLog.IrParaFim();  // rolagem nossa: sem TopIndex (nada de ShiftWindow na tela)
             else lbLog.Repintar();    // lendo o historico: fica onde voce esta
             // a barra nativa ja foi escurecida na abertura e na troca de tema:
-            // reaplicar a cada linha for�ava o Windows a repintar a caixa
+            // reaplicar a cada linha forcava o Windows a repintar a caixa
             // (era o outro lado do piscado)
         }
 
@@ -5205,7 +5238,7 @@ void MandarPaises()
         }
 
         // REDUZIR EM ETAPAS: o GDI+ nao amostra uma reducao grande de uma vez
-        // (600 -> 64 num passo so = borr�o preto). Corta pela metade ate chegar
+        // (600 -> 64 num passo so = borrao preto). Corta pela metade ate chegar
         // perto do alvo e so entao faz o passo final.
         static Bitmap ReduzirEmPassos(Image fonte, int lado)
         {
@@ -5412,7 +5445,7 @@ void MandarPaises()
                 for (int i = 0; i < n; i++)
                 {
                     try { img.SelectActiveFrame(fd, i); } catch { }
-                    // quadro reduzido EM ETAPAS (600 -> 64 sem virar borr�o) e
+                    // quadro reduzido EM ETAPAS (600 -> 64 sem virar borrao) e
                     // com o preto de fundo removido: o et fica TRANSPARENTE
                     var quadro = QuadroDoEt(img);
                     quadros.Add(quadro);
@@ -7759,6 +7792,10 @@ Bitmap MontarFundoCover()
             try { fontesTimer.Stop(); } catch { }
             try { if (connected) Desconectar(); } catch { }
             try { PararMotor(); } catch { }
+            // o servico do OpenVPN pode ter ficado de pe na espera dos 2 min:
+            // saindo do programa ele desce junto
+            try { if (timerServico != null) { timerServico.Stop(); timerServico.Dispose(); timerServico = null; } } catch { }
+            try { DesligarServicoOpenVpn(); } catch { }
             tray.Visible = false;
             tray.Dispose();
             pollTimer.Stop();
@@ -7963,7 +8000,9 @@ Bitmap MontarFundoCover()
                 {
                     // O driver TAP-Windows so cria o adaptador quando o
                     // OpenVPNServiceInteractive esta no ar. Ele fica em "Manual"
-                    // (nao sobe com o Windows) e e ligado aqui.
+                    // (nao sobe com o Windows) e e ligado aqui. Se a pessoa
+                    // acabou de desconectar, ele ainda esta de pe: nada a fazer.
+                    try { CancelarDesligarServico(); } catch { }
                     try { LigarServicoOpenVpn(); } catch { }
                     // enquanto o .ovpn esta subindo a lista fica parada: se a revisao
                     // rodasse no meio, a remontagem trocaria o servidor escolhido
@@ -8061,10 +8100,14 @@ Bitmap MontarFundoCover()
                     }
                     if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag;
                 });
-                // espera a leitura da selecao
-                for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
-                BeginInvoke((Action)delegate { if (lv.SelectedItems.Count > 0) s = (Servidor)lv.SelectedItems[0].Tag; });
-                for (int i = 0; i < 40 && s == null && lv.Items.Count > 0; i++) Thread.Sleep(25);
+                // espera curtissima pela leitura da selecao e, se a tela nao
+                // responder, ja vai no melhor da lista: esperar 2 s aqui era
+                // tempo perdido com o botao travado
+                for (int i = 0; i < 16 && s == null; i++) Thread.Sleep(25);
+                if (s == null)
+                {
+                    try { foreach (var c in servers) if (c != null) { s = c; break; } } catch { }
+                }
             }
             else
             {
@@ -8112,8 +8155,11 @@ Bitmap MontarFundoCover()
                     foreach (ListViewItem it in lv.Items) tmp.Add((Servidor)it.Tag);
                     daLista = tmp;
                 });
-                for (int i = 0; i < 80 && daLista == null; i++) Thread.Sleep(25);
-                if (daLista == null) daLista = servers;
+                // a fila de reserva vem da lista do programa; se a tela estiver
+                // ocupada (a WebView2 desenha a lista inteira), espera 1/2 s e
+                // usa a lista real - esperar 2 s atrasava a conexao
+                for (int i = 0; i < 20 && daLista == null; i++) Thread.Sleep(25);
+                if (daLista == null || daLista.Count == 0) daLista = servers;
                 add(s);
                 var mesmo = new List<Servidor>();
                 var outros = new List<Servidor>();
@@ -8249,9 +8295,11 @@ Bitmap MontarFundoCover()
         {
             LimparRotasNossas();
             PararMotor();
-            // o servico do OpenVPN fica em "Manual": desce aqui para nao
-            // ficar rodando sem uso
-            DesligarServicoOpenVpn();
+            // o servico do OpenVPN nao desce na hora: ele fica de pe por
+            // 2 minutos. Subir de novo custa 1 a 3 s e e justo o tempo que
+            // a pessoa leva para clicar em CONECTAR de novo. Depois disso,
+            // sozinho, ele desce.
+            AgendarDesligarServico();
             connected = false;
             BeginInvoke((Action)delegate
             {
@@ -8259,6 +8307,50 @@ Bitmap MontarFundoCover()
                 AtualizarEstadoConexao();
             });
             Log("Desconectado.");
+        }
+
+        System.Windows.Forms.Timer timerServico;
+
+        // 2 minutos sem uso -> o servico do OpenVPN desce sozinho
+        void AgendarDesligarServico()
+        {
+            try
+            {
+                if (saindo || disposing) return;
+                Action marcar = delegate
+                {
+                    try
+                    {
+                        if (timerServico != null) { try { timerServico.Stop(); timerServico.Dispose(); } catch { } }
+                        timerServico = new System.Windows.Forms.Timer();
+                        timerServico.Interval = 120000;
+                        timerServico.Tick += delegate
+                        {
+                            try { timerServico.Stop(); timerServico.Dispose(); timerServico = null; } catch { }
+                            if (connected) return;
+                            try { DesligarServicoOpenVpn(); } catch { }
+                        };
+                        timerServico.Start();
+                    }
+                    catch { }
+                };
+                if (InvokeRequired) BeginInvoke((Action)marcar); else marcar();
+            }
+            catch { }
+        }
+
+        void CancelarDesligarServico()
+        {
+            try
+            {
+                if (timerServico == null) return;
+                Action parar = delegate
+                {
+                    try { if (timerServico != null) { timerServico.Stop(); timerServico.Dispose(); timerServico = null; } } catch { }
+                };
+                if (InvokeRequired) BeginInvoke((Action)parar); else parar();
+            }
+            catch { }
         }
 
         // Fecha e abre o Discord (ou apenas abre se nao estiver rodando).
@@ -8449,7 +8541,7 @@ Bitmap MontarFundoCover()
                     {
                         // 400 aqui quase sempre e assinatura vencida: relendo a
                         // lista com credencial nova e tentando o mesmo servidor
-                        urbanAccs = "";                      // for�a recadastrar
+                        urbanAccs = "";                      // forca recadastrar
                         urbanProxyToks.Clear();
                         accs = UrbanPegarAccs();
                         try { proxyTok = Rede.UrbanToken(Rede.UrbanGetProxyToken(accs, s.Sig)); } catch { }
@@ -9202,17 +9294,48 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var ports = new List<int>();
             foreach (var p in base_) if (p > 0 && p <= 65535 && !ports.Contains(p)) ports.Add(p);
             if (ports.Count == 0) ports.Add(1194);
-            // 4) sonda tudo em paralelo nos dois protocolos
-            List<PortaResp> resp;
-            try { resp = SondarPortas(s.IP, ports, ports); }
-            catch { resp = new List<PortaResp>(); }
-            if (resp.Count > 0)
-                Log("Sonda de portas em " + s.IP + ": " + resp.Count + " responderam" + (fixa ? " (preferindo " + protocol.ToUpperInvariant() + ")" : "") + ".");
-            foreach (var r in resp)
+            // 4) SONDAGEM EM PARALELO - a conexao NAO espera a sonda.
+            //
+            // A sonda de portas leva ate 2,2 s e antes dela o programa
+            // ficava parado, olhando, antes de comecar o openvpn. Agora ela
+            // roda numa thread ao lado: o openvpn ja comeca na porta que o
+            // proprio .ovpn declarou (que e a certa na maioria das vezes) e
+            // o resultado da sonda so e usado SE a primeira tentativa
+            // falhar - quando ela ja terminou faz tempo. Economia: ~2 s em
+            // toda conexao.
+            List<PortaResp> resp = new List<PortaResp>();
+            try
             {
-                if (fixa && r.Proto != protocol) continue;   // entra no passo 6
-                add(r.Porta, r.Proto, true);
+                sondaRodando = true;
+                sondaFim = null;
+                var sinal = new ManualResetEventSlim(false);
+                sondaSinal = sinal;
+                var portasSonda = new List<int>(ports);
+                var ipSonda = s.IP;
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    List<PortaResp> r;
+                    try { r = SondarPortas(ipSonda, portasSonda, portasSonda); }
+                    catch { r = new List<PortaResp>(); }
+                    sondaFim = r;
+                    sondaRodando = false;
+                    try { sinal.Set(); } catch { }
+                    if (r != null && r.Count > 0)
+                    {
+                        try
+                        {
+                            Log("Sonda de portas em " + ipSonda + ": " + r.Count + " responderam"
+                                + (fixa ? " (preferindo " + protocol.ToUpperInvariant() + ")" : "") + ".");
+                        }
+                        catch { }
+                    }
+                });
             }
+            catch { }
+            // 4b) as portas mais usadas entram na fila como reserva: se a
+            // primeira tentativa falhar, ha algo pronto para tentar
+            foreach (var pc in PortasTcpComuns) { add(pc, "tcp", false); break; }
+            foreach (var pu in PortasUdpComuns) { add(pu, "udp", false); break; }
             // 5) as portas do .ovpn entram mesmo sem resposta (a sonda perde pacote)
             foreach (var p in portasCfg)
             {
@@ -9222,27 +9345,70 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 if (!fixa && pr2 == "udp") add(p, "tcp", false);
                 else if (!fixa && pr2 == "tcp") add(p, "udp", false);
             }
-            // 6) resto dos respondentes no outro protocolo (reserva automatica)
-            if (fixa)
-                foreach (var r in resp) add(r.Porta, r.Proto, true);
-            // 7) a sonda manda na ordem: quem respondeu (na ordem de
-            // velocidade) primeiro, o resto depois - inclusive a vencedora
-            // aprendida, que so vai na frente se confirmar viva agora
+            // 6) a ordem fina da fila (quem respondeu na sonda) fica para
+            // ReordenarComSonda, chamada SO se a primeira porta falhar
+            return combos;
+        }
+
+        static string ChavePorta(ComboPorta c)
+        {
+            return (c == null ? "" : c.Porta + "/" + c.Proto);
+        }
+
+        // resultado da sonda de portas, que roda em paralelo com a 1a
+        // tentativa (nao segura a conexao)
+        List<PortaResp> sondaFim = null;
+        ManualResetEventSlim sondaSinal = null;
+        volatile bool sondaRodando = false;
+
+        // Chamada depois que a PRIMEIRA porta falhou: a sonda ja deve ter
+        // terminado (2,2 s) - quem respondeu vai para a frente, na ordem de
+        // velocidade; o resto da fila continua atras. Se ela ainda estiver
+        // rodando, espera so o que falta (no maximo 2,6 s).
+        void ReordenarComSonda(List<ComboPorta> combos)
+        {
+            List<PortaResp> resp = null;
             try
             {
-                foreach (var r in resp)
-                    foreach (var c in combos)
-                        if (c.Porta == r.Porta && c.Proto == r.Proto) { c.Respondeu = true; break; }
-                var ordenados = new List<ComboPorta>();
-                foreach (var r in resp)
-                    foreach (var c in combos)
-                        if (!ordenados.Contains(c) && c.Porta == r.Porta && c.Proto == r.Proto) ordenados.Add(c);
-                foreach (var c in combos)
-                    if (!ordenados.Contains(c)) ordenados.Add(c);
-                combos = ordenados;
+                if (sondaRodando && sondaSinal != null) sondaSinal.Wait(2600);
+                resp = sondaFim;
             }
             catch { }
-            return combos;
+            sondaFim = null;
+            try { if (sondaSinal != null) { sondaSinal.Dispose(); sondaSinal = null; } } catch { }
+            sondaRodando = false;
+            if (resp == null || resp.Count == 0) return;
+            bool fixa = (protocol == "tcp" || protocol == "udp");
+            try
+            {
+                var ordenados = new List<ComboPorta>();
+                foreach (var r in resp)
+                {
+                    if (fixa && r.Proto != protocol) continue;
+                    ComboPorta achado = null;
+                    foreach (var c in combos)
+                        if (c.Porta == r.Porta && c.Proto == r.Proto) { achado = c; break; }
+                    if (achado == null) achado = new ComboPorta { Porta = r.Porta, Proto = r.Proto, Respondeu = true };
+                    else achado.Respondeu = true;
+                    if (!ordenados.Contains(achado)) ordenados.Add(achado);
+                }
+                if (fixa)
+                    foreach (var r in resp)
+                        if (r.Proto != protocol)
+                        {
+                            ComboPorta achado = null;
+                            foreach (var c in combos)
+                                if (c.Porta == r.Porta && c.Proto == r.Proto) { achado = c; break; }
+                            if (achado == null) achado = new ComboPorta { Porta = r.Porta, Proto = r.Proto, Respondeu = true };
+                            else achado.Respondeu = true;
+                            if (!ordenados.Contains(achado)) ordenados.Add(achado);
+                        }
+                foreach (var c in combos)
+                    if (!ordenados.Contains(c)) ordenados.Add(c);
+                combos.Clear();
+                combos.AddRange(ordenados);
+            }
+            catch { }
         }
 
         class ResultadoTunel { public bool Ok; public string Txt; public string Detalhe; }
@@ -9257,7 +9423,10 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 45000)
             {
-                Thread.Sleep(200);
+                // 100 ms: a conexao ja esta de pe quando o log recebe o
+                // "Initialization Sequence Completed", e esperar 200 ms para
+                // ver isso era 200 ms de tela parada depois doCONNECTAR
+                Thread.Sleep(100);
                 try
                 {
                     if (File.Exists(log))
@@ -9393,9 +9562,16 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 if (Version.TryParse(vOv, out vv) && Version.TryParse("2.5.0", out v25) && vv >= v25) ovpnNovo = true;
             }
             catch { }
+            var jaTentadas = new HashSet<string>();
             for (int ti = 0; ti < maxTentativas; ti++)
             {
-                var cb = combos[ti];
+                // depois da primeira falha, a sonda de portas (que rodou em
+                // paralelo) coloca na frente quem respondeu de verdade
+                if (ti > 0) { try { ReordenarComSonda(combos); } catch { } }
+                ComboPorta cb = null;
+                foreach (var c in combos) if (!jaTentadas.Contains(ChavePorta(c))) { cb = c; break; }
+                if (cb == null) break;
+                jaTentadas.Add(ChavePorta(cb));
                 try { if (File.Exists(log)) File.Delete(log); } catch { }
                 try
                 {
@@ -9608,6 +9784,65 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             ownedRoutes.Add(prefixo);
         }
 
+        // ---------- rotas em lote (uma passada so) ----------
+        // Mesmos comandos do AdicionarRota/RemoverRota, so que todos num
+        // processo so. Conectar nao paga mais um "route.exe" por destino.
+        string TxtRotaAdd(string prefixo)
+        {
+            return "route add " + Rede.RedeDePrefixo(prefixo) + " mask " + Rede.MascaraDePrefixo(prefixo)
+                 + " " + vpnGw + " metric 1";
+        }
+
+        string TxtRotaDel(string prefixo, bool comGw)
+        {
+            var gw = (!comGw || String.IsNullOrEmpty(vpnGw)) ? "" : " " + vpnGw;
+            return "route delete " + Rede.RedeDePrefixo(prefixo) + " mask " + Rede.MascaraDePrefixo(prefixo) + gw;
+        }
+
+        void AdicionarRotasLote(List<string> prefixos)
+        {
+            var cmds = new List<string>();
+            foreach (var p in prefixos)
+                if (!String.IsNullOrEmpty(p) && !ownedRoutes.Contains(p)) { cmds.Add(TxtRotaAdd(p)); ownedRoutes.Add(p); }
+            if (cmds.Count > 0) Rede.RunCmdLote(cmds);
+        }
+
+        void RemoverRotasLote(IEnumerable<string> prefixos)
+        {
+            var lista = new List<string>();
+            foreach (var p in prefixos) if (!String.IsNullOrEmpty(p)) lista.Add(p);
+            if (lista.Count == 0) return;
+            var cmds = new List<string>();
+            foreach (var p in lista) cmds.Add(TxtRotaDel(p, true));
+            Rede.RunCmdLote(cmds);
+            // CONFIRMA O RESULTADO: o Windows recusa alguns "route delete"
+            // quando a rota e a mesma que acabou de ser acrescentada (ele
+            // processa em fila). Medido: das 29 rotas do Discord, 2 ficaram
+            // presas no gateway morto - e rota presa no tunel que caiu e
+            // justamente o que derruba o programa do usuario. O que sobrar
+            // e apagado de novo, uma por vez.
+            try
+            {
+                for (int volta = 0; volta < 2; volta++)
+                {
+                    var ativas = RotasAtivas();
+                    var sobraram = new List<string>();
+                    foreach (var p in lista)
+                    {
+                        foreach (var r in ativas)
+                        {
+                            if (r[0] == Rede.RedeDePrefixo(p) && r[1] == Rede.MascaraDePrefixo(p))
+                            { sobraram.Add(p); break; }
+                        }
+                    }
+                    if (sobraram.Count == 0) return;
+                    foreach (var p in sobraram)
+                        Rede.RunCmd("route", "delete " + Rede.RedeDePrefixo(p) + " mask " + Rede.MascaraDePrefixo(p) + (String.IsNullOrEmpty(vpnGw) ? "" : " " + vpnGw));
+                }
+            }
+            catch { }
+        }
+
         void RemoverRota(string alvo)
         {
             var prefixo = alvo.Contains("/") ? alvo : alvo + "/32";
@@ -9619,11 +9854,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         void LimparRotasNossas()
         {
             if (!String.IsNullOrEmpty(urbanProxyUrl)) { try { DesligarUrbanProxy(); } catch { } }
-            foreach (var ip in ownedRoutes.ToArray())
-            {
-                RemoverRota(ip);
-                ownedRoutes.Remove(ip);
-            }
+            var nossas = ownedRoutes.ToArray();
+            ownedRoutes.Clear();
+            RemoverRotasLote(nossas);
             if (defRoute) { RemoverRotaPadrao(); defRoute = false; }
             LigarIpv6DeVolta();
             // cache de DNS pode guardar resposta do caminho velho: limpa
@@ -9633,7 +9866,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         void LimparRotasAntigas()
         {
             // no comeco da conexao, limpa rotas do tunel que sobraram de antes
-            foreach (var ip in ownedRoutes.ToArray()) { RemoverRota(ip); ownedRoutes.Remove(ip); }
+            var antigas = ownedRoutes.ToArray();
+            ownedRoutes.Clear();
+            RemoverRotasLote(antigas);
             // varredura na tabela: rotas via gateways 10.211.x MORTOS (de sessoes
             // passadas, que a lista nao conhece mais) ficam empilhadas e, com a
             // mesma metrica da rota viva, podem engolir o destino. So sai rota
@@ -9658,13 +9893,10 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         void AdicionarRotaPadrao()
         {
             if (String.IsNullOrEmpty(vpnGw)) return;
+            var novas = new List<string>();
             foreach (var pr in new[] { "0.0.0.0/1", "128.0.0.0/1" })
-            {
-                if (ownedRoutes.Contains(pr)) continue;
-                // metric 1: a cobertura do PC inteiro vence a rota padrao fisica
-                Rede.RunCmd("route", "add " + Rede.RedeDePrefixo(pr) + " mask " + Rede.MascaraDePrefixo(pr) + " " + vpnGw + " metric 1");
-                ownedRoutes.Add(pr);
-            }
+                if (!ownedRoutes.Contains(pr)) novas.Add(pr);
+            if (novas.Count > 0) AdicionarRotasLote(novas);
             defRoute = true;
             DnsDoTunel(true);
         }
@@ -9674,8 +9906,10 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             // IMPORTADO: a mascara e obrigatoria. Sem ela o comando vira
             // "route delete 0.0.0.0", que apaga a rota PADRAO do Windows
             // (0.0.0.0/0) e deixa a maquina sem internet nenhuma.
+            var cmds = new List<string>();
             foreach (var pr in new[] { "0.0.0.0/1", "128.0.0.0/1" })
-                Rede.RunCmd("route", "delete " + Rede.RedeDePrefixo(pr) + " mask " + Rede.MascaraDePrefixo(pr));
+                cmds.Add("route delete " + Rede.RedeDePrefixo(pr) + " mask " + Rede.MascaraDePrefixo(pr));
+            if (cmds.Count > 0) Rede.RunCmdLote(cmds);
             DnsDoTunel(false);
         }
 
@@ -9925,8 +10159,17 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 }
             }
 
+            // todas as rotas novas num processo so (o Discord sozinho ja e
+            // meia duzia de enderecos: um "route add" por endereco custava
+            // quase um segundo DEPOIS do "Conectado")
+            var aCriar = new List<string>();
             foreach (var ip in want)
-                if (!ownedRoutes.Contains(ip)) { AdicionarRota(ip); ownedRoutes.Add(ip); }
+            {
+                var pref = ip.Contains("/") ? ip : ip + "/32";
+                if (ownedRoutes.Contains(pref)) continue;
+                aCriar.Add(pref);
+            }
+            AdicionarRotasLote(aCriar);
 
             // PEGA E NAO SOLTA MAIS: rota aprendida fica ate sair da lista/VPN
             var nomes = new HashSet<string>(appList.Select(a => a.Name.ToLowerInvariant()));
@@ -9961,8 +10204,8 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                         var t = ln.Trim();
                         if (t.Length == 0) continue;
                         // NAO se procura o cabecalho em nenhum idioma: ele muda
-                        // ("Network Destination" no ingles, "Endere�o de rede"
-                        // no portugues - e com a codificacao trocada o � chega
+                        // ("Network Destination" no ingles, "Endereco de rede"
+                        // no portugues - e com a codificacao trocada o o chega
                         // ate mangled). Vale a LINHA: se comeca com IP + mascara
                         // e rota, em qualquer idioma, em qualquer Windows. As
                         // outras linhas (interfaces, titulos, "Nenhum"/"None")
