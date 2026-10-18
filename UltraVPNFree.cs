@@ -9574,33 +9574,15 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
 
         string EscolherPrograma()
         {
-            // 1) programas INSTALADOS - a lista do "Programas e Recursos"
-            var lista = ProgramasInstalados();
-
-            // 2) + os .exe achados nas pastas de programas (Steam, Discord,
-            //    jogos e apps sem entrada propria) e os abertos agora
-            var caminhos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in lista) caminhos.Add(p[1]);
-            foreach (var kv in Candidatos())
-            {
-                if (caminhos.Contains(kv.Key)) continue;
-                var fn = Path.GetFileName(kv.Key) ?? "";
-                if (String.Equals(kv.Key, Store.ExePath, StringComparison.OrdinalIgnoreCase)) continue;
-                if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) continue;
-                if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) continue;
-                if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) continue;
-                caminhos.Add(kv.Key);
-                lista.Add(new[] { kv.Value, kv.Key });
-            }
-
-            // 3) SEM repetidos: um item por NOME e um por .exe. O primeiro que
-            //    entra ganha - e os instalados do registro vem primeiro, com
-            //    o nome bonito que o Windows mostra.
+            // SOMENTE os programas INSTALADOS - a mesma lista do "Programas
+            // e Recursos" do Windows, so os principais, sem repetidos: um
+            // item por NOME e um por .exe. (Os .exe soltos de pastas saem -
+            // para esses, o caminho manual embaixo resolve.)
             var caminhoVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var exeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var nomeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var items = new List<string[]>();
-            foreach (var p in lista
+            foreach (var p in ProgramasInstalados()
                 .OrderBy(p => p[0], StringComparer.OrdinalIgnoreCase)
                 .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase))
             {
@@ -9615,13 +9597,13 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
 
             var dlg = new Form();
             dlg.Text = "Escolha o programa";
-            dlg.Size = new Size(780, 640);
+            dlg.Size = new Size(780, 660);
             dlg.StartPosition = FormStartPosition.CenterParent;
             dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
             dlg.MinimizeBox = false;
             dlg.MaximizeBox = false;
             dlg.ShowInTaskbar = false;
-            dlg.Font = new Font("Segoe UI", 9);
+            dlg.Font = new Font("Segoe UI", 10);
             dlg.BackColor = Color.FromArgb(4, 13, 15);
 
             var lbl1 = new Label();
@@ -9648,7 +9630,7 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             grade.BackColor = Color.FromArgb(4, 13, 15);
             grade.ForeColor = CorTexto;
             var icones = new ImageList();
-            icones.ImageSize = new Size(24, 24);
+            icones.ImageSize = new Size(32, 32);
             icones.ColorDepth = ColorDepth.Depth32Bit;
             grade.SmallImageList = icones;
             grade.Location = new Point(12, 66);
@@ -9703,13 +9685,13 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                         try
                         {
                             using (var orig = ((Icon)par[1]).ToBitmap())
-                            using (var b = new Bitmap(24, 24))
+                            using (var b = new Bitmap(32, 32))
                             {
                                 using (var g = Graphics.FromImage(b))
                                 {
                                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                                     g.Clear(Color.Transparent);
-                                    g.DrawImage(orig, new Rectangle(0, 0, 24, 24));
+                                    g.DrawImage(orig, new Rectangle(0, 0, 32, 32));
                                 }
                                 icones.Images.Add(cam, b);
                             }
