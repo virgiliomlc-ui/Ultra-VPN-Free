@@ -846,6 +846,10 @@ namespace UltraVPN
         // O arquivo tem os mesmos campos do CSV do VPN Gate (e o .ovpn em
         // base64 junto), entao o programa trata igual.
         public const string EspelhoUrl = "https://raw.githubusercontent.com/9xN/auto-ovpn/main/json/data.json";
+        // Segundo espelho do VPN Gate, atualizado muitas vezes por dia, em
+        // formato diferente (country_code + openvpn_config_base64). Foi ele
+        // que trouxe Peru e Paraguai quando o primeiro espelho veio vazio.
+        public const string Espelho2Url = "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/main/data/servers.json";
         public const string PvlUrl = "https://publicvpnlist.com";
         public const string TlxUrl = "https://telexy.net/api/v1";
         public const string VpnBookUser = "vpnbook";
@@ -1424,6 +1428,115 @@ namespace UltraVPN
             }
             catch { }
             return saida;
+        }
+
+        // ---------------- espelho 2 do VPN Gate (GitHub) ----------------
+        // Formato novo: a raiz e um objeto com "servers", e cada servidor
+        // traz "country_code" (em vez de countryshort), "ip",
+        // "openvpn_config_base64", "ping_ms" e "speed_bps". Entra o que
+        // for da America do Sul e tiver .ovpn embutido.
+        public static List<Servidor> ParseEspelho2Json(string json)
+        {
+            var saida = new List<Servidor>();
+            if (String.IsNullOrWhiteSpace(json)) return saida;
+            try
+            {
+                // A raiz deste espelho e um OBJETO com "servers" dentro. O
+                // detalhe que custou tempo: deserializar um objeto como
+                // IEnumerable NAO da erro - devolve o enumerador do
+                // dicionario (KeyValuePair), o contador de itens fica > 0 e
+                // o caminho do objeto nunca era tentado. Por isso a raiz
+                // objeto e lida PRIMEIRO, e a lista so como reserva.
+                var itens = new List<object>();
+                Dictionary<string, object> raiz = null;
+                try { raiz = Js.Deserialize<Dictionary<string, object>>(json); }
+                catch { }
+                if (raiz != null) itens.Add(raiz);
+                else
+                {
+                    try
+                    {
+                        var arr2 = Js.Deserialize<IEnumerable>(json);
+                        if (arr2 != null) foreach (object o in arr2) itens.Add(o);
+                    }
+                    catch { }
+                }
+                foreach (object o in itens)
+                {
+                    var d = o as Dictionary<string, object>;
+                    if (d == null) continue;
+                    var srv = d.ContainsKey("servers") ? (d["servers"] as IEnumerable) : null;
+                    if (srv != null)
+                    {
+                        foreach (object os in srv)
+                        {
+                            var s = os as Dictionary<string, object>;
+                            if (s == null) continue;
+                            // uma entrada estragada nao pode derrubar a fonte
+                            // inteira: cada servidor e convertido no seu try
+                            try
+                            {
+                                var conv = ConverterEspelho2(s);
+                                if (conv != null) saida.Add(conv);
+                            }
+                            catch { }
+                        }
+                        continue;
+                    }
+                    // a raiz ja e a lista de servidores
+                    try
+                    {
+                        var conv2 = ConverterEspelho2(d);
+                        if (conv2 != null) saida.Add(conv2);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return saida;
+        }
+
+        static Servidor ConverterEspelho2(Dictionary<string, object> s)
+        {
+            Func<string, string> campo = delegate(string k)
+            {
+                try { if (s.ContainsKey(k) && s[k] != null) return s[k].ToString(); } catch { }
+                return "";
+            };
+            var iso = campo("country_code").ToUpperInvariant();
+            if (String.IsNullOrEmpty(iso)) iso = campo("countryshort").ToUpperInvariant();
+            if (Array.IndexOf(Dados.LatAmOrder, iso) < 0) return null;
+            var ip = campo("ip");
+            if (String.IsNullOrEmpty(ip)) return null;
+            var cfgB64 = campo("openvpn_config_base64");
+            if (String.IsNullOrEmpty(cfgB64)) cfgB64 = campo("openvpn_configdata_base64");
+            if (!Regex.IsMatch(cfgB64, "^[A-Za-z0-9+/=]{60,}$")) return null;   // sem .ovpn nao serve
+            int pingVal = 0; long speedVal = 0; int sessVal = 0; long scoreVal = 0;
+            int.TryParse(campo("ping_ms"), out pingVal);
+            if (pingVal == 0) int.TryParse(campo("ping"), out pingVal);
+            long.TryParse(campo("speed_bps"), out speedVal);
+            if (speedVal == 0) long.TryParse(campo("speed"), out speedVal);
+            int.TryParse(campo("num_vpn_sessions"), out sessVal);
+            if (sessVal == 0) int.TryParse(campo("numvpnsessions"), out sessVal);
+            long.TryParse(campo("score"), out scoreVal);
+            string proto; int porta;
+            ExtrairProtoPorta(cfgB64, out proto, out porta);
+            return new Servidor
+            {
+                Host = campo("hostname"),
+                IP = ip,
+                Name = Dados.GetCountryName(iso),
+                ISO = iso,
+                Ping = pingVal,
+                Speed = speedVal,
+                Sessions = sessVal,
+                Score = scoreVal,
+                Measured = -1,
+                Proto = proto,
+                Port = porta,
+                Src = "gate2",
+                Cfg = cfgB64
+            };
         }
 
         // ---------------- lista publica (publicvpnlist.com) ----------------
@@ -5899,6 +6012,7 @@ Bitmap MontarFundoCover()
             };
             foreach (var s in gateServers) entrar(s);
             foreach (var s in gateEspelho) entrar(s);   // reserva: mesmos servidores por outro caminho
+            foreach (var s in gateEspelho2) entrar(s);  // segundo espelho, formato novo
             foreach (var s in pvlServers) entrar(s);
             foreach (var s in vpnBookServers) entrar(s);
             foreach (var s in urbanServers) entrar(s);
@@ -6253,6 +6367,18 @@ Bitmap MontarFundoCover()
                     var wc2 = Rede.NovoWc();
                     dlEspStart = DateTime.Now;
                     dlEspelho = wc2.DownloadStringTaskAsync(new Uri(Dados.EspelhoUrl));
+                }
+            }
+            catch { }
+            // o segundo espelho tambem vai junto, em paralelo: e o que traz
+            // Peru e Paraguai quando o primeiro espelho vem sem a America do Sul
+            try
+            {
+                if (dlEspelho2 == null || dlEspelho2.IsCompleted)
+                {
+                    var wc3 = Rede.NovoWc();
+                    dlEsp2Start = DateTime.Now;
+                    dlEspelho2 = wc3.DownloadStringTaskAsync(new Uri(Dados.Espelho2Url));
                 }
             }
             catch { }
@@ -6823,6 +6949,26 @@ Bitmap MontarFundoCover()
                 dlEspelho = null; dlEspStart = DateTime.MinValue;
             }
 
+            // espelho 2 (GitHub, formato novo) terminou?
+            if (dlEspelho2 != null && dlEspelho2.IsCompleted)
+            {
+                var t2 = dlEspelho2;
+                dlEspelho2 = null;
+                dlEsp2Start = DateTime.MinValue;
+                try
+                {
+                    if (t2.IsFaulted) throw t2.Exception.GetBaseException();
+                    AplicarEspelho2(t2.Result);
+                }
+                catch { }
+            }
+
+            // nunca deixa o espelho 2 pendurado
+            if (dlEspelho2 != null && dlEsp2Start != DateTime.MinValue && (DateTime.Now - dlEsp2Start).TotalSeconds > 60)
+            {
+                dlEspelho2 = null; dlEsp2Start = DateTime.MinValue;
+            }
+
             // IP externo terminou?
             if (ipTask != null && ipTask.IsCompleted)
             {
@@ -6873,11 +7019,22 @@ Bitmap MontarFundoCover()
         int gateUltimoGate = 0;
         int gateUltimoEspelho = -1;
         List<Servidor> gateEspelho = new List<Servidor>();
+        List<Servidor> gateEspelho2 = new List<Servidor>();
+        Task<string> dlEspelho2 = null;
+        DateTime dlEsp2Start = DateTime.MinValue;
 
         // espelho GitHub chegou: guarda e remonta a lista junto com o VPN Gate
         void AplicarEspelho(string json)
         {
             gateEspelho = Rede.ParseEspelhoJson(json);
+            CombinarGate(-1, -1, gateEspelho.Count);
+        }
+
+        // espelho 2 chegou: mesma coisa, outra fonte e outro formato
+        void AplicarEspelho2(string json)
+        {
+            gateEspelho2 = Rede.ParseEspelho2Json(json);
+            try { Log("Espelho 2 (GitHub): " + gateEspelho2.Count + " servidores da America Latina."); } catch { }
             CombinarGate(-1, -1, gateEspelho.Count);
         }
 
