@@ -6642,13 +6642,16 @@ Bitmap MontarFundoCover()
         //  O botao "Medir ping" mede PING E VELOCIDADE: primeiro o tempo de
         //  resposta de cada servidor da lista (TCP: aperto de mao cronome-
         //  trado; UDP: o PING do proprio OpenVPN) e depois a velocidade que
-        //  cada fonte mediu e publica. Roda sozinho logo depois da
-        //  conferencia de conexao (ao abrir e a cada atualizacao da lista) e
-        //  de novo a cada clique no botao.
+        //  cada fonte mediu e publica. Roda sozinho logo depois de CADA
+        //  conferencia de conexao (a 1a e a 2a de cada ciclo) e de novo a
+        //  cada clique no botao. Se um pedido chega com outra medicao
+        //  rodando, ele espera e roda logo em seguida - nada se perde.
         void MedirTudo(bool manual)
         {
             try { if (saindo || disposing) return; } catch { return; }
-            if (medindo) return;
+            // ja ha uma medicao rodando: guarda o pedido para medir de novo
+            // assim que esta terminar (nada de perder a medida do usuario)
+            if (medindo) { try { medirPendente = true; } catch { } return; }
             var alvo = new List<Servidor>();
             try { foreach (var s in servers) if (s != null) alvo.Add(s); } catch { return; }
             if (alvo.Count == 0) return;
@@ -6693,11 +6696,21 @@ Bitmap MontarFundoCover()
                             }
                             catch { }
                         }
+                        // chegou outro pedido de medir enquanto esta rodava
+                        try
+                        {
+                            if (medirPendente) { medirPendente = false; MedirTudo(manual); }
+                        }
+                        catch { }
                     };
                     try { if (InvokeRequired) BeginInvoke(pintar); else pintar(); }
-                    catch { medindo = false; }
+                    catch { medindo = false; try { if (medirPendente) { medirPendente = false; MedirTudo(manual); } } catch { } }
                 }
-                catch { medindo = false; }
+                catch
+                {
+                    medindo = false;
+                    try { if (medirPendente) { medirPendente = false; MedirTudo(manual); } } catch { }
+                }
             });
         }
 
@@ -6884,15 +6897,7 @@ Bitmap MontarFundoCover()
             }
             catch { }
             // assim que a conexao e conferida, mede ping e velocidade de tudo
-            try
-            {
-                if (medirAoConferir)
-                {
-                    medirAoConferir = false;
-                    MedirTudo(false);
-                }
-            }
-            catch { }
+            try { MedirTudo(false); } catch { }
             AgendarProximaConferencia();
         }
 
@@ -7003,8 +7008,8 @@ Bitmap MontarFundoCover()
         {
             try { if (saindo || disposing) return; } catch { return; }
             // a cada busca de fontes (ao abrir e a cada 10 min) a lista volta
-            // a ser conferida E a ter ping e velocidade medidos de novo
-            try { medirAoConferir = true; } catch { }
+            // a ser conferida (e, no fim de cada conferencia, ping e velocidade
+            // sao medidos de novo)
             try { conferenciasNoCiclo = 0; } catch { }   // duas conferencias por ciclo
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -7450,7 +7455,7 @@ Bitmap MontarFundoCover()
         List<Servidor> gateDescoberto = new List<Servidor>(); // o que a busca de fontes trouxe
         System.Windows.Forms.Timer cicloTimer;            // repete a conferencia de conexao
         bool medindo = false;                            // medicao de ping/velocidade em andamento
-        bool medirAoConferir = true;                     // mede ping+velocidade depois da conferencia
+        bool medirPendente = false;                     // chegou pedido de medir com uma medicao rodando
         int conferenciasNoCiclo = 0;                     // 2 conferencias por ciclo (abrir/atualizar)
         Task<string> dlEspelho2 = null;
         DateTime dlEsp2Start = DateTime.MinValue;
