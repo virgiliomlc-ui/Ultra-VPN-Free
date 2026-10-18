@@ -984,6 +984,10 @@ namespace UltraVPN
         public static readonly string TempDir = Path.Combine(Path.GetTempPath(), "Ultra VPN Free");
         public static readonly string LogPath = Path.Combine(DirDados, "ultravpnfree.log");
         public static readonly string CachePath = Path.Combine(DirDados, "servers.cache");
+        // A LISTA CONFERIDA do ultimo ciclo (so o que respondeu de verdade).
+        // Salva sempre que a lista muda e e lida ao abrir o programa: o
+        // usuario entra vendo a ultima lista boa e ela volta a ser conferida.
+        public static readonly string ListaPath = Path.Combine(DirDados, "lista_salva.cache");
 
         // ---------------------------------------------------------------
         //  SERVIDORES QUE JA DERAM CERTO
@@ -1092,6 +1096,17 @@ namespace UltraVPN
         public static void WriteCache(string raw)
         {
             try { File.WriteAllText(CachePath, raw, new UTF8Encoding(false)); } catch { }
+        }
+
+        // ---------------- lista conferida (so quem tem conexao) ----------------
+        public static string ReadLista()
+        {
+            try { if (!File.Exists(ListaPath)) return null; return File.ReadAllText(ListaPath, Encoding.UTF8); }
+            catch { return null; }
+        }
+        public static void WriteLista(string txt)
+        {
+            try { File.WriteAllText(ListaPath, txt, new UTF8Encoding(false)); } catch { }
         }
 
         // ---------------- cache de .ovpn por servidor ----------------
@@ -3897,8 +3912,19 @@ public static string UrbanGetServers(string accsToken)
             Shown += delegate { AoAbrirJanela(); };
             Load += delegate
             {
+                // a lista ja conferida do ultimo ciclo entra PRIMEITO, antes
+                // de qualquer busca: o usuario ve na hora a ultima lista boa
+                // (a que os servidores responderam), e ela volta a ser
+                // conferida assim que o programa atualiza as fontes
+                try
+                {
+                    CarregarListaSalva();
+                    if (gateSalvo.Count > 0) JuntarListas();
+                }
+                catch { }
+
                 // a barra de rolagem encosta na borda direita da janela:
-                // as listas ganham a largura que faltava (o espacinho da direita)
+                // as listas ganam a largura que faltava (o espacinho da direita)
                 try { lv.Width = ClientSize.Width - lv.Left; } catch { }
                 try { lbLog.Width = ClientSize.Width - lbLog.Left; } catch { }
 
@@ -6011,6 +6037,7 @@ Bitmap MontarFundoCover()
                 catch { }
             };
             foreach (var s in gateServers) entrar(s);
+            foreach (var s in gateSalvo) entrar(s);      // lista conferida do ultimo ciclo
             foreach (var s in gateEspelho) entrar(s);   // reserva: mesmos servidores por outro caminho
             foreach (var s in gateEspelho2) entrar(s);  // segundo espelho, formato novo
             foreach (var s in pvlServers) entrar(s);
@@ -6500,16 +6527,18 @@ Bitmap MontarFundoCover()
         // ============================================================
         //  CONFERENCIA DE CONEXAO REAL (ao abrir e a cada 10 min)
         // ============================================================
-        //  Depois de buscar as fontes em TODAS elas (VPN Gate, espelho,
-        //  lista publica, telexy, hunt, VPNBook e Urban), o programa
-        //  testa a porta de cada servidor da America do Sul: aperto de
-        //  mao no TCP e PING/PONG do proprio OpenVPN no UDP. Quem
-        //  responde E tem .ovpn utilizavel sobe para o topo, com o
-        //  tempo real do aperto de mao na coluna "Seu ping". Quem nao
-        //  respondeu fica no fim da lista - nunca some (perda de pacote
-        //  e UDP fechado nao significa servidor fora do ar) e nunca
-        //  fica em primeiro lugar. Se quase ninguem responder, a lista
-        //  mantem todos para o usuario poder tentar.
+        //  Ciclo completo, repetido para sempre:
+        //    1) as fontes entregam a lista toda da America do Sul
+        //    2) o programa testa a porta de cada servidor (aperto de mao
+        //       no TCP, PING/PONG do OpenVPN no UDP)
+        //    3) quem NAO tem conexao certa sai da lista e a lista nova
+        //       vai para o disco
+        //    4) alguns segundos depois o ciclo roda DE NOVO, para o que
+        //       acabou de chegar das fontes passar pela mesma conferencia
+        //  Quem respondeu e tem .ovpn utilizavel sobe para o topo, com o
+        //  tempo real do aperto de mao na coluna "Seu ping". Se NENHUM
+        //  responder, a lista NAO e esvaziada (rede local sem internet nao
+        //  pode apagar a lista do usuario) - nesse caso so avisa.
         void VerificarConexaoReal()
         {
             try { if (saindo || disposing) return; } catch { return; }
@@ -6537,34 +6566,136 @@ Bitmap MontarFundoCover()
                 catch { }
             }
 
-            // 3) monta a lista final: os que funcionam em primeiro, do
-            //    mais rapido para o mais lento; o resto vai para o fim
+            // 3) lista nova: SÓ quem tem conexao certa. Quem nao respondeu
+            //    sai agora - e volta sozinho na proxima atualizacao das
+            //    fontes, quando ganha outra chance.
             var verificados = new List<Servidor>();
-            var outros = new List<Servidor>();
             foreach (var s in alvo)
             {
                 int ms;
                 bool respondeu = rtt.TryGetValue(s.IP, out ms) && ms >= 0;
                 s.Measured = respondeu ? ms : -1;
                 if (respondeu && cfgBoa.Contains(s.IP)) verificados.Add(s);
-                else outros.Add(s);
             }
             verificados.Sort(delegate (Servidor a, Servidor b)
             { return a.Measured.CompareTo(b.Measured); });
 
-            var nova = new List<Servidor>();
-            nova.AddRange(verificados);
-            if (verificados.Count < 3) nova.AddRange(outros);
-            if (nova.Count == 0) return;
+            if (verificados.Count == 0)
+            {
+                // nenhum respondeu: e rede do PC, nao lista ruim. Mantem
+                // tudo e avisa, para o usuario nao acordar com a tela vazia.
+                try { Log("Nenhum servidor respondeu agora - a lista foi mantida (conferir a internet)."); } catch { }
+                SalvarListaEmDisco();
+                AgendarProximaConferencia();
+                return;
+            }
 
             try
             {
-                servers = nova;
+                servers = verificados;
                 if (sortCol < 0) OrdenarPadrao();
-                AtualizarLista();
-                EnviarLista();
+                SalvarListaEmDisco();
+                // a tela e mexida na thread da interface (a conferencia roda
+                // em segundo plano, junto com as sondas)
+                Action aplicar = delegate
+                {
+                    try { AtualizarLista(); } catch { }
+                    try { EnviarLista(); } catch { }
+                };
+                try { if (InvokeRequired) BeginInvoke(aplicar); else aplicar(); } catch { }
                 Log("Conexao conferida: " + verificados.Count + " de " + alvo.Count
-                    + " servidores responderam agora.");
+                    + " servidores da America do Sul tem conexao certa (o resto saiu da lista).");
+            }
+            catch { }
+            AgendarProximaConferencia();
+        }
+
+        // repete o ciclo: alguns segundos depois roda a conferencia de novo,
+        // pegando o que chegou das fontes depois da primeira
+        void AgendarProximaConferencia()
+        {
+            try
+            {
+                if (saindo || disposing) return;
+                // o Timer do Windows Forms so dispara na thread que tem laco
+                // de mensagens: criado em thread de fundo ele nunca toca.
+                Action agendar = delegate
+                {
+                    try
+                    {
+                        if (cicloTimer != null) { try { cicloTimer.Stop(); } catch { } }
+                        cicloTimer = new System.Windows.Forms.Timer();
+                        cicloTimer.Interval = 20000;
+                        cicloTimer.Tick += delegate
+                        {
+                            try { cicloTimer.Stop(); } catch { }
+                            VerificarConexaoReal();
+                        };
+                        cicloTimer.Start();
+                    }
+                    catch { }
+                };
+                if (InvokeRequired) BeginInvoke(agendar); else agendar();
+            }
+            catch { }
+        }
+
+        // ---------------- lista conferida em disco ----------------
+        // Sempre que a lista muda ela vai para o arquivo, e ao abrir o
+        // programa essa mesma lista volta para a tela antes da busca.
+        void SalvarListaEmDisco()
+        {
+            try
+            {
+                var linhas = new List<string>();
+                linhas.Add("# ip;porta;proto;ISO;fonte;ms;cidade - lista conferida do ultimo ciclo");
+                foreach (var s in servers)
+                {
+                    if (s == null || String.IsNullOrEmpty(s.IP) || s.Port <= 0) continue;
+                    linhas.Add(s.IP + ";" + s.Port + ";" + (s.Proto ?? "") + ";" + (s.ISO ?? "") + ";"
+                                + (s.Src ?? "") + ";" + s.Measured + ";" + (s.Cidade ?? ""));
+                }
+                if (linhas.Count < 2) return;
+                Store.WriteLista(String.Join("\r\n", linhas.ToArray()));
+            }
+            catch { }
+        }
+
+        void CarregarListaSalva()
+        {
+            try
+            {
+                var txt = Store.ReadLista();
+                if (String.IsNullOrWhiteSpace(txt)) return;
+                var salvos = new List<Servidor>();
+                foreach (var l in txt.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+                {
+                    var ln = l.Trim();
+                    if (ln == "" || ln.StartsWith("#")) continue;
+                    var p = ln.Split(';');
+                    if (p.Length < 4) continue;
+                    int porta = 0, medido = -1;
+                    Int32.TryParse(p[1], out porta);
+                    if (p.Length > 5) Int32.TryParse(p[5], out medido);
+                    var ip = p[0].Trim();
+                    var iso = p[3].Trim();
+                    if (String.IsNullOrEmpty(ip) || porta <= 0) continue;
+                    if (!Dados.EhLatina(iso)) continue;
+                    salvos.Add(new Servidor
+                    {
+                        IP = ip,
+                        Port = porta,
+                        Proto = p[2].Trim(),
+                        ISO = iso,
+                        Src = p.Length > 4 && !String.IsNullOrEmpty(p[4]) ? p[4].Trim() : "gate",
+                        Measured = medido,
+                        Cidade = p.Length > 6 ? p[6] : "",
+                        Name = Dados.GetCountryName(iso)
+                    });
+                }
+                if (salvos.Count == 0) return;
+                gateSalvo = salvos;
+                Log("Lista salva do ultimo ciclo carregada: " + salvos.Count + " servidores.");
             }
             catch { }
         }
@@ -7020,6 +7151,8 @@ Bitmap MontarFundoCover()
         int gateUltimoEspelho = -1;
         List<Servidor> gateEspelho = new List<Servidor>();
         List<Servidor> gateEspelho2 = new List<Servidor>();
+        List<Servidor> gateSalvo = new List<Servidor>();   // lista conferida do ultimo ciclo
+        System.Windows.Forms.Timer cicloTimer;            // repete a conferencia de conexao
         Task<string> dlEspelho2 = null;
         DateTime dlEsp2Start = DateTime.MinValue;
 
@@ -9949,7 +10082,7 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
 
             foreach (var t in new[] { pollTimer, watch, rtimer, reconTimer, bootTimer,
                                       connTimer, updateTimer, fontesTimer, penteTimer,
-                                      piscarTimer, trayTimer })
+                                      piscarTimer, trayTimer, cicloTimer })
                 try { t.Stop(); } catch { }
 
             // ---- 1) rede: tunel, proxy, rotas, DNS e IPv6 ----
