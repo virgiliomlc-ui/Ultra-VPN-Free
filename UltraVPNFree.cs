@@ -3487,8 +3487,7 @@ public static string UrbanGetServers(string accsToken)
             btnAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnAdd.Click += delegate
             {
-                var escolhido = EscolherPrograma();
-                if (escolhido != null) AdicionarPrograma(escolhido);
+                AbrirSeletor();
             };
             Controls.Add(btnAdd);
 
@@ -4326,12 +4325,16 @@ void MandarPaises()
                             Conectar();
                             return;
                         }
-                    case "adicionarPrograma":
+                    case "adicionarPrograma": AbrirSeletor(); return;
+                    case "seletorEscolher":
                         {
-                            var escolhido = EscolherPrograma();
-                            if (escolhido != null) AdicionarPrograma(escolhido);
+                            // a tela escolheu um item do seletor
+                            object vp; m.TryGetValue("caminho", out vp);
+                            var caminho = (Convert.ToString(vp) ?? "").Trim();
+                            if (caminho != "") AdicionarPrograma(caminho);
                             return;
                         }
+                    case "seletorCancelar": return;
                     case "escolherPrograma":
                         {
                             // a tela marcou um programa na lista (clique na linha)
@@ -9572,343 +9575,108 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             catch { return null; }
         }
 
-        // quadrado de cantos arredondados (o "azulejo" do icone na lista)
-        static GraphicsPath CaminhoArredondado(Rectangle r, int raio)
+        // ============================================================
+        //  SELETOR DE PROGRAMAS (dentro da tela WebView2)
+        // ============================================================
+        //  O seletor e HTML/CSS/JS, dentro da propria tela do programa
+        //  (WebView2): e o mesmo desenho da tela web, sem janela do
+        //  Windows no meio. O programa so monta a lista de instalados (o
+        //  registro do "Programas e Recursos") e manda o nome, o caminho e
+        //  os icones; a tela cuida da busca, da lista e da escolha.
+        void AbrirSeletor()
         {
-            var p = new GraphicsPath();
-            int d = raio * 2;
-            p.AddArc(r.X, r.Y, d, d, 180, 90);
-            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            p.CloseFigure();
-            return p;
-        }
-
-        string EscolherPrograma()
-        {
-            // SOMENTE os programas INSTALADOS - a mesma lista do "Programas
-            // e Recursos" do Windows, so os principais, sem repetidos: um
-            // item por NOME e um por .exe. (Os .exe soltos de pastas saem -
-            // para esses, o caminho manual embaixo resolve.)
-            var caminhoVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var exeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var nomeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var items = new List<string[]>();
-            foreach (var p in ProgramasInstalados()
-                .OrderBy(p => p[0], StringComparer.OrdinalIgnoreCase)
-                .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase))
+            if (!telaWeb) { EscolherProgramaAntigo(); return; }
+            try
             {
-                if (!caminhoVisto.Add(p[1])) continue;
-                var fn = Path.GetFileNameWithoutExtension(p[1]) ?? "";
-                if (!exeVisto.Add(fn)) continue;
-                var n = String.IsNullOrWhiteSpace(p[0]) ? fn : p[0].Trim();
-                if (!nomeVisto.Add(n)) continue;
-                items.Add(new[] { n, p[1] });
-            }
-            if (items.Count > 600) items = items.Take(600).ToList();
-
-            var dlg = new Form();
-            dlg.Text = "Escolha o programa";
-            dlg.Size = new Size(780, 700);
-            dlg.StartPosition = FormStartPosition.CenterScreen;   // centro da TELA
-            dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-            dlg.MinimizeBox = false;
-            dlg.MaximizeBox = false;
-            dlg.ShowInTaskbar = false;
-            dlg.Font = new Font("Segoe UI", 10.5F);
-            dlg.BackColor = Color.FromArgb(4, 13, 15);
-
-            var lbl1 = new Label();
-            lbl1.Text = "Programas instalados neste PC - duplo clique no icone escolhe:";
-            lbl1.ForeColor = CorTexto;
-            lbl1.Location = new Point(12, 12);
-            lbl1.Size = new Size(740, 20);
-            dlg.Controls.Add(lbl1);
-
-            var filtro = new TextBox();
-            filtro.Location = new Point(12, 34);
-            filtro.Size = new Size(740, 26);
-            dlg.Controls.Add(filtro);
-
-            var grade = new ListView();
-            grade.View = View.Details;
-            grade.FullRowSelect = true;
-            grade.MultiSelect = false;
-            grade.HideSelection = true;
-            grade.ShowItemToolTips = true;
-            grade.HeaderStyle = ColumnHeaderStyle.Nonclickable;
-            grade.OwnerDraw = true;   // pintado a mao, igual a previa aprovada
-            grade.Columns.Add("Programa", 300);
-            grade.Columns.Add("Caminho", 440);
-            grade.BackColor = Color.FromArgb(4, 13, 15);
-            grade.ForeColor = CorTexto;
-            var icones = new ImageList();
-            icones.ImageSize = new Size(48, 48);
-            icones.ColorDepth = ColorDepth.Depth32Bit;
-            grade.SmallImageList = icones;   // so para a ALTURA das linhas
-            grade.Location = new Point(12, 66);
-            grade.Size = new Size(740, 430);
-            dlg.Controls.Add(grade);
-
-            // A grade ja abre CHEIA de nomes (rapido). Os icones entram por
-            // tras: extraidos FORA da tela e entregues aos poucos, icone por
-            // icone - a janela nunca fica presa esperando o disco.
-            var mapa = new Dictionary<string, ListViewItem>(StringComparer.OrdinalIgnoreCase);
-            var todosDaGrade = new List<ListViewItem>();
-            foreach (var p in items)
-            {
-                var it = new ListViewItem(p[0]);
-                it.Tag = p[1];
-                it.ToolTipText = p[1];                it.ImageIndex = -1;
-                grade.Items.Add(it);
-                todosDaGrade.Add(it);
-                mapa[p[1]] = it;
-            }
-            var prontos = new List<object[]>();    // [caminho, icone]
-            var extrator = new Thread(new ThreadStart(delegate
-            {
-                foreach (var p in items)
+                // so os principais, sem repetidos: um por nome e um por .exe
+                var caminhoVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var exeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var nomeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var lista = new List<object>();
+                foreach (var p in ProgramasInstalados()
+                    .OrderBy(p => p[0], StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase))
                 {
-                    Icon ic = null;
-                    try { ic = Icon.ExtractAssociatedIcon(p[1]); } catch { }
-                    if (ic == null) continue;
-                    try { lock (prontos) prontos.Add(new object[] { p[1], (Icon)ic.Clone() }); }
-                    catch { try { ic.Dispose(); } catch { } }
+                    if (!caminhoVisto.Add(p[1])) continue;
+                    var fn = Path.GetFileNameWithoutExtension(p[1]) ?? "";
+                    if (!exeVisto.Add(fn)) continue;
+                    var n = String.IsNullOrWhiteSpace(p[0]) ? fn : p[0].Trim();
+                    if (!nomeVisto.Add(n)) continue;
+                    lista.Add(new Dictionary<string, object> {
+                        { "nome", n },
+                        { "caminho", p[1] }
+                    });
+                    if (lista.Count >= 600) break;
                 }
-            }));
-            extrator.IsBackground = true;
-            var pintor = new System.Windows.Forms.Timer();
-            pintor.Interval = 80;
-            pintor.Tick += delegate
-            {
-                try
+                // a tela ja abre com nome + caminho; os icones vao chegando
+                TelaWeb.Mandar("seletorAberto", new Dictionary<string, object> { { "lista", lista } });
+
+                // icones por tras, em pedacos: a tela abre na hora e vai
+                // preenchendo os quadradinhos enquanto extrai do disco
+                ThreadPool.QueueUserWorkItem(delegate
                 {
-                    List<object[]> lote;
-                    lock (prontos)
+                    var icones = new List<object>();
+                    var antes = DateTime.Now;
+                    foreach (var it in lista)
                     {
-                        if (prontos.Count == 0) return;
-                        lote = prontos.Take(8).ToList();
-                        prontos.RemoveRange(0, lote.Count);
-                    }
-                    foreach (var par in lote)
-                    {
-                        var cam = (string)par[0];
-                        ListViewItem it;
-                        if (!mapa.TryGetValue(cam, out it)) continue;
+                        var caminho = (string)((Dictionary<string, object>)it)["caminho"];
                         try
                         {
-                            using (var orig = ((Icon)par[1]).ToBitmap())
-                            using (var b = new Bitmap(48, 48))
+                            Icon ic;
+                            lock (cacheIcones)
                             {
-                                using (var g = Graphics.FromImage(b))
+                                if (!cacheIcones.TryGetValue(caminho, out ic))
                                 {
-                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                    g.Clear(Color.Transparent);
-                                    g.DrawImage(orig, new Rectangle(0, 0, 48, 48));
+                                    try { ic = Icon.ExtractAssociatedIcon(caminho); } catch { ic = null; }
+                                    cacheIcones[caminho] = ic;
                                 }
-                                icones.Images.Add(cam, b);
                             }
-                            it.ImageIndex = icones.Images.IndexOfKey(cam);
+                            if (ic != null)
+                                icones.Add(new Dictionary<string, object> {
+                                    { "caminho", caminho },
+                                    { "icone", TelaWeb.IconeDataUri(ic) }
+                                });
                         }
                         catch { }
-                    }
-                }
-                catch { }
-            };
-
-            var lbl2 = new Label();
-            lbl2.Text = "Ou digite o caminho do arquivo .exe:";
-            lbl2.ForeColor = CorTexto;
-            lbl2.Location = new Point(12, 508);
-            lbl2.Size = new Size(740, 20);
-            dlg.Controls.Add(lbl2);
-
-            var txt = new TextBox();
-            txt.Location = new Point(12, 534);
-            txt.Size = new Size(740, 26);
-            dlg.Controls.Add(txt);
-
-            var lblMsg = new Label();
-            lblMsg.Location = new Point(12, 566);
-            lblMsg.Size = new Size(740, 20);
-            lblMsg.ForeColor = Color.Firebrick;
-            dlg.Controls.Add(lblMsg);
-
-            var btnOk = new Button();
-            btnOk.Text = "Escolher";
-            btnOk.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-            btnOk.Location = new Point(500, 600);
-            btnOk.Size = new Size(120, 32);
-            btnOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            dlg.Controls.Add(btnOk);
-
-            var btnCancel = new Button();
-            btnCancel.Text = "Cancelar";
-            btnCancel.Location = new Point(632, 600);
-            btnCancel.Size = new Size(120, 32);
-            btnCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            dlg.Controls.Add(btnCancel);
-
-            string resultado = null;
-            Action escolher = delegate
-            {
-                var p = "";
-                try { if (grade.SelectedItems.Count > 0) p = (string)grade.SelectedItems[0].Tag; } catch { }
-                if (String.IsNullOrEmpty(p)) p = (txt.Text ?? "").Trim();
-                if (p == "") { lblMsg.Text = "Escolha um programa na lista ou digite o caminho do .exe."; return; }
-                if (!File.Exists(p)) { lblMsg.Text = "Esse arquivo n\u00e3o existe. Confira o caminho."; return; }
-                resultado = p;
-                dlg.DialogResult = DialogResult.OK;
-                dlg.Close();
-            };
-            btnOk.Click += delegate { escolher(); };
-            btnCancel.Click += delegate { resultado = null; dlg.DialogResult = DialogResult.Cancel; dlg.Close(); };
-            grade.SelectedIndexChanged += delegate
-            {
-                try
-                {
-                    if (grade.SelectedItems.Count > 0)
-                    { txt.Text = (string)grade.SelectedItems[0].Tag; lblMsg.Text = ""; }
-                }
-                catch { }
-            };
-            grade.DoubleClick += delegate { escolher(); };
-            // filtrar pelo nome enquanto digita (a grade e reconstruida so
-            // com quem bate com o texto)
-            filtro.TextChanged += delegate
-            {
-                try
-                {
-                    grade.BeginUpdate();
-                    grade.Items.Clear();
-                    var q = (filtro.Text ?? "").Trim();
-                    foreach (var it in todosDaGrade)
-                        if (String.IsNullOrEmpty(q) ||
-                            it.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
-                            grade.Items.Add(it);
-                }
-                catch { }
-                finally { try { grade.EndUpdate(); } catch { } }
-            };
-            // ---- pintura da lista, identica a previa aprovada ----
-            var fNome = new Font("Segoe UI", 12.5F, FontStyle.Bold);
-            var fCaminho = new Font("Segoe UI", 9.5F);
-            var fCabecalho = new Font("Segoe UI", 9.5F, FontStyle.Bold);
-            int hoverIdx = -1;
-            grade.MouseMove += delegate (object s, MouseEventArgs ev2)
-            {
-                var it = grade.GetItemAt(ev2.X, ev2.Y);
-                int novo = it == null ? -1 : it.Index;
-                if (novo != hoverIdx)
-                {
-                    hoverIdx = novo;
-                    try { grade.Invalidate(); } catch { }
-                }
-            };
-            grade.MouseLeave += delegate
-            {
-                if (hoverIdx != -1) { hoverIdx = -1; try { grade.Invalidate(); } catch { } }
-            };
-            grade.DrawColumnHeader += delegate (object s, DrawListViewColumnHeaderEventArgs ev)
-            {
-                // cabecalho escuro: "Programa | Caminho"
-                using (var b = new SolidBrush(Color.FromArgb(6, 33, 37)))
-                    ev.Graphics.FillRectangle(b, ev.Bounds);
-                using (var p = new Pen(Color.FromArgb(18, 51, 56)))
-                    ev.Graphics.DrawLine(p, ev.Bounds.X, ev.Bounds.Bottom - 1, ev.Bounds.Right - 1, ev.Bounds.Bottom - 1);
-                TextRenderer.DrawText(ev.Graphics, ev.Header.Text, fCabecalho,
-                    new Rectangle(ev.Bounds.X + 10, ev.Bounds.Y, ev.Bounds.Width - 12, ev.Bounds.Height),
-                    Color.FromArgb(159, 215, 222),
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-            };
-            grade.DrawItem += delegate (object s, DrawListViewItemEventArgs ev)
-            {
-                // nada aqui: quem pinta cada pedaco e o DrawSubItem abaixo
-            };
-            grade.DrawSubItem += delegate (object s, DrawListViewSubItemEventArgs ev)
-            {
-                var g = ev.Graphics;
-                var bnd = ev.Bounds;
-                var it = ev.Item;
-                bool sel = it.Selected;
-                bool hover = it.Index == hoverIdx && !sel;
-                Color fundo = sel ? Color.FromArgb(13, 65, 73)
-                     : hover ? Color.FromArgb(10, 50, 56)
-                     : (it.Index % 2 == 1 ? Color.FromArgb(5, 20, 26)
-                                          : Color.FromArgb(4, 16, 19));
-                using (var b = new SolidBrush(fundo))
-                    g.FillRectangle(b, bnd);
-                if (sel)
-                    using (var p = new Pen(Color.FromArgb(29, 106, 116)))
-                        g.DrawRectangle(p, bnd.X, bnd.Y, bnd.Width - 1, bnd.Height - 1);
-
-                if (ev.ColumnIndex == 0)
-                {
-                    // ---- icone dentro do quadrado arredondado ----
-                    var cam = (it.Tag as string) ?? "";
-                    int lado = 48;
-                    int tx = bnd.X + 8;
-                    int ty = bnd.Y + (bnd.Height - lado) / 2;
-                    using (var rquery = CaminhoArredondado(new Rectangle(tx, ty, lado, lado), 10))
-                    {
-                        g.SmoothingMode = SmoothingMode.AntiAlias;
-                        using (var b = new SolidBrush(Color.FromArgb(7, 30, 35)))
-                            g.FillPath(b, rquery);
-                        using (var p = new Pen(Color.FromArgb(18, 51, 56)))
-                            g.DrawPath(p, rquery);
-                    }
-                    try
-                    {
-                        if (icones.Images.ContainsKey(cam))
+                        if (icones.Count >= 12 || (DateTime.Now - antes).TotalSeconds >= 1)
                         {
-                            var img = icones.Images[cam];
-                            int li = 38;
-                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                            g.DrawImage(img, new Rectangle(tx + (lado - li) / 2, ty + (lado - li) / 2, li, li));
+                            EnviarIconesSeletor(icones);
+                            icones = new List<object>();
+                            antes = DateTime.Now;
+                            System.Threading.Thread.Sleep(30);
                         }
                     }
-                    catch { }
-                    // ---- o nome, grande e branco ----
-                    var rn = new Rectangle(tx + lado + 14, bnd.Y, bnd.Width - (tx - bnd.X) - lado - 20, bnd.Height);
-                    TextRenderer.DrawText(g, it.Text, fNome, rn, Color.White,
-                        TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
-                }
-                else
-                {
-                    // ---- o caminho, menor e cinza ----
-                    var cam = (it.Tag as string) ?? "";
-                    var rc = new Rectangle(bnd.X + 6, bnd.Y, bnd.Width - 10, bnd.Height);
-                    TextRenderer.DrawText(g, cam, fCaminho, rc, Color.FromArgb(127, 182, 189),
-                        TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PathEllipsis);
-                }
-            };
-
-            dlg.Shown += delegate
+                    if (icones.Count > 0) EnviarIconesSeletor(icones);
+                });
+            }
+            catch (Exception e)
             {
-                // grade no tema escuro (barra de rolagem inclusive)
-                try
-                {
-                    Nativo.SetWindowTheme(grade.Handle, "DarkMode_Explorer", null);
-                    Nativo.EscurecerScroll(grade.Handle);
-                }
+                try { TelaWeb.Mandar("seletorErro", new Dictionary<string, object> { { "texto", e.Message } }); }
                 catch { }
-                try { extrator.Start(); pintor.Start(); } catch { }
-                filtro.Focus();
-            };
-            dlg.FormClosed += delegate
-            {
-                try { pintor.Stop(); } catch { }
-                try { icones.Dispose(); } catch { }
-                try { fNome.Dispose(); } catch { }
-                try { fCaminho.Dispose(); } catch { }
-                try { fCabecalho.Dispose(); } catch { }
-            };
+            }
+        }
 
-            dlg.ShowDialog(this);
-            try { pintor.Stop(); } catch { }
-            dlg.Dispose();
-            return resultado;
+        void EnviarIconesSeletor(List<object> lote)
+        {
+            try { TelaWeb.Mandar("seletorIcones", new Dictionary<string, object> { { "icones", lote } }); }
+            catch { }
+        }
+
+        // sem WebView2 (Runtime faltando): a janela antiga so ganha o
+        // seletor de arquivos do proprio Windows
+        void EscolherProgramaAntigo()
+        {
+            try
+            {
+                using (var d = new OpenFileDialog())
+                {
+                    d.Title = "Escolha o programa";
+                    d.Filter = "Programas (*.exe)|*.exe|Todos os arquivos (*.*)|*.*";
+                    if (d.ShowDialog(this) != DialogResult.OK) return;
+                    AdicionarPrograma(d.FileName);
+                }
+            }
+            catch { }
         }
 
         // ============================================================

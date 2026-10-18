@@ -58,6 +58,9 @@ window.uvfn_recebe = function (d) {
       case 'temas':    aplicarTemas(d.temas); break;
       case 'et':       mostrarEt(d.quadros); break;
       case 'imagens':  aplicarImagens(d); break;
+      case 'seletorAberto': abrirSeletor(d.lista || []); break;
+      case 'seletorIcones':  aplicarIconesSeletor(d.icones || []); break;
+      case 'seletorErro':    document.getElementById('selMsg').textContent = d.texto || 'erro'; break;
     }
   } catch (e) {
     manda('errojs', { texto: 'uvfn_recebe: ' + e.message });
@@ -512,6 +515,113 @@ window.addEventListener('resize', function () {
   medirTrilho('cxLista', 'polegarLista', estado.servidores.length);
   medirTrilho('cxProg', 'polegarProg', estado.programas.length);
   medirTrilho('log', 'polegarLog', document.getElementById('logRolagem').childNodes.length);
+});
+
+/* ---------------- seletor de programas ----------------
+   A janela do seletor mora dentro da tela (WebView2), no mesmo desenho da
+   previa. O programa manda nome + caminho de cada programa instalado e os
+   icones vao chegando depois, aos poucos. Aqui: busca, selecao, escolha. */
+var selLista = [];       // [{nome, caminho, icone}]
+var selIdx = -1;         // linha marcada
+
+function abrirSeletor(lista) {
+  selLista = lista || [];
+  selIdx = selLista.length ? 0 : -1;
+  var cx = document.getElementById('seletor');
+  cx.classList.add('aberto');
+  document.getElementById('selMsg').textContent = '';
+  document.getElementById('selCaminho').value = '';
+  desenharSeletor();
+  var busca = document.getElementById('selBusca');
+  busca.value = '';
+  setTimeout(function () { busca.focus(); }, 30);
+}
+
+function fecharSeletor(cancelar) {
+  document.getElementById('seletor').classList.remove('aberto');
+  if (cancelar) manda('seletorCancelar');
+}
+
+function filtroSeletor() {
+  return (document.getElementById('selBusca').value || '').trim().toLowerCase();
+}
+
+function desenharSeletor() {
+  var q = filtroSeletor();
+  var h = '';
+  var n = 0;
+  for (var i = 0; i < selLista.length; i++) {
+    var p = selLista[i];
+    if (q && String(p.nome).toLowerCase().indexOf(q) < 0) continue;
+    h += '<div class="selLinha' + (i === selIdx ? ' sel' : '') + '" data-i="' + i + '">' +
+         '<div class="selProg"><div class="selIc">' +
+         (p.icone ? '<img src="' + p.icone + '" alt="">' : '') +
+         '</div><div class="selNome">' + esc(p.nome) + '</div></div>' +
+         '<div class="selCaminhoTxt">' + esc(p.caminho) + '</div></div>';
+    n++;
+  }
+  if (n === 0) h = '<div class="selLinha"><div class="selCaminhoTxt">nada encontrado</div></div>';
+  document.getElementById('selLinhas').innerHTML = h;
+  var linhas = document.querySelectorAll('#selLinhas .selLinha');
+  for (var k = 0; k < linhas.length; k++) {
+    (function (el) {
+      var i = parseInt(el.getAttribute('data-i'), 10);
+      el.addEventListener('click', function () {
+        selIdx = i;
+        document.getElementById('selCaminho').value = selLista[i].caminho;
+        var ant = document.querySelector('#selLinhas .selLinha.sel');
+        if (ant) ant.classList.remove('sel');
+        el.classList.add('sel');
+      });
+      el.addEventListener('dblclick', function () { escolherSeletor(); });
+    })(linhas[k]);
+  }
+}
+
+function aplicarIconesSeletor(icones) {
+  var mudou = false;
+  for (var i = 0; i < icones.length; i++) {
+    for (var j = 0; j < selLista.length; j++) {
+      if (selLista[j].caminho === icones[i].caminho && !selLista[j].icone) {
+        selLista[j].icone = icones[i].icone;
+        mudou = true;
+        break;
+      }
+    }
+  }
+  if (mudou) desenharSeletor();
+}
+
+function escolherSeletor() {
+  var caminho = (document.getElementById('selCaminho').value || '').trim();
+  if (!caminho && selIdx >= 0 && selLista[selIdx]) caminho = selLista[selIdx].caminho;
+  if (!caminho) {
+    document.getElementById('selMsg').textContent = 'Escolha um programa na lista ou digite o caminho do .exe.';
+    return;
+  }
+  document.getElementById('seletor').classList.remove('aberto');
+  manda('seletorEscolher', { caminho: caminho });
+}
+
+document.getElementById('selBusca').addEventListener('input', function () {
+  selIdx = -1;
+  desenharSeletor();
+});
+document.getElementById('selEscolher').addEventListener('click', escolherSeletor);
+document.getElementById('selCancelar').addEventListener('click', function () { fecharSeletor(true); });
+document.getElementById('selX').addEventListener('click', function () { fecharSeletor(true); });
+document.getElementById('selCaminho').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter') escolherSeletor();
+});
+document.getElementById('selBusca').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter') escolherSeletor();
+  if (ev.key === 'Escape') fecharSeletor(true);
+});
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Escape') {
+    var cx = document.getElementById('seletor');
+    if (cx && cx.classList.contains('aberto')) fecharSeletor(true);
+  }
 });
 
 /* pronto */

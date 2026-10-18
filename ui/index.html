@@ -96,6 +96,32 @@
     <div class="trilho"><div class="polegar" id="polegarLog"></div></div>
   </div>
 
+  <!-- ---------------- seletor de programas (dentro da tela) ----------------
+       a MESMA janela da previa: busca em cima, lista com icone + nome +
+       caminho, e embaixo o campo do caminho manual com os botoes -->
+  <div id="seletor">
+    <div class="selJanela">
+      <div class="selTitulo"><span>Escolha o programa</span><span id="selX">×</span></div>
+      <div class="selCorpo">
+        <div class="selRotulo">Programas instalados neste PC - duplo clique no ícone escolhe:</div>
+        <input class="selBusca" id="selBusca" placeholder="digite para procurar pelo nome... (ex.: stea)" autocomplete="off" spellcheck="false">
+        <div class="selLista" id="selLista">
+          <div class="selCab"><div>Programa</div><div>Caminho</div></div>
+          <div id="selLinhas"></div>
+        </div>
+        <div class="selRodape">
+          <span class="selRodapeRot">Ou digite o caminho do arquivo .exe:</span>
+          <input class="selCaminho" id="selCaminho" placeholder="C:\caminho\do\programa.exe" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="selBotoes">
+          <button class="selBtn selPri" id="selEscolher">Escolher</button>
+          <button class="selBtn" id="selCancelar">Cancelar</button>
+        </div>
+        <div class="selMsg" id="selMsg"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script src="app.js"></script>

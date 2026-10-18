@@ -281,3 +281,89 @@ tbody tr.srv td:nth-child(5) { color:#4ee6ea; }
 }
 #log .rolagem { padding:0 17px 0 0; }
 .linhaLog { white-space:pre-wrap; word-break:break-all; }
+/* ---------- seletor de programas (SO AQUI) ----------
+   A janela do seletor, desenhada dentro da tela (WebView2), no mesmo
+   desenho da previa: fundo quase preto, busca com borda ciano discreta,
+   lista com cabecalho "Programa | Caminho", linha com o icone dentro de
+   um quadrado de cantos arredondados, nome em branco e caminho em
+   cinza-azulado. Fica por cima da tela (#seletor), centralizado. */
+#seletor {
+  position:absolute; inset:0; z-index:60;
+  display:none; align-items:center; justify-content:center;
+  background:rgba(1,8,10,.82);
+}
+#seletor.aberto { display:flex; }
+.selJanela {
+  width:780px; max-width:calc(100% - 40px); max-height:calc(100% - 40px);
+  display:flex; flex-direction:column;
+  background:#040d0f; border:1px solid #1d4a52; border-radius:10px;
+  box-shadow:0 24px 70px rgba(0,0,0,.65); overflow:hidden;
+}
+.selTitulo {
+  background:#062125; color:#dff5f8;
+  padding:9px 14px; font-size:13.5px; font-weight:600;
+  display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid #1d4a52; flex:0 0 auto; user-select:none;
+}
+.selTitulo #selX {
+  cursor:pointer; opacity:.55; font-size:17px; line-height:1;
+  padding:0 4px; border-radius:4px;
+}
+.selTitulo #selX:hover { opacity:1; background:rgba(29,106,116,.45); }
+.selCorpo { padding:13px; display:flex; flex-direction:column; min-height:0; }
+.selRotulo { color:#cdeef3; font-size:13px; margin-bottom:9px; flex:0 0 auto; }
+.selBusca, .selCaminho {
+  background:#071a1e; border:1px solid #1d4a52; border-radius:6px;
+  color:#e8fbfd; font-size:13px; padding:7px 11px; outline:none;
+  font-family:inherit;
+}
+.selBusca { width:100%; margin-bottom:11px; flex:0 0 auto; }
+.selBusca:focus, .selCaminho:focus { border-color:#2a7d88; }
+.selBusca::placeholder, .selCaminho::placeholder { color:#4d7d85; }
+.selLista {
+  background:#041013; border:1px solid #123338; border-radius:6px;
+  overflow-y:auto; overflow-x:hidden; flex:1 1 auto; min-height:110px;
+}
+.selLista::-webkit-scrollbar { width:10px; }
+.selLista::-webkit-scrollbar-track { background:#061a1e; }
+.selLista::-webkit-scrollbar-thumb { background:#1d4a52; border-radius:5px; }
+.selCab, .selLinha { display:grid; grid-template-columns:300px 1fr; align-items:center; }
+.selCab {
+  background:#062125; border-bottom:1px solid #123338;
+  position:sticky; top:0; z-index:2;
+}
+.selCab div { padding:6px 12px; color:#9fd7de; font-size:12.5px; font-weight:600; }
+.selLinha {
+  padding:7px 12px; border-bottom:1px solid #0a2327; cursor:pointer; color:#e8f4f8;
+}
+.selLinha:nth-child(odd) { background:#05141a; }
+.selLinha:hover { background:#0a3238; }
+.selLinha.sel { background:#0d4149; outline:1px solid #1d6a74; outline-offset:-1px; }
+.selProg { display:flex; align-items:center; gap:14px; min-width:0; }
+.selIc {
+  width:48px; height:48px; flex:0 0 48px;
+  display:flex; align-items:center; justify-content:center;
+  background:#071e23; border:1px solid #123338; border-radius:10px; overflow:hidden;
+}
+.selIc img { width:40px; height:40px; object-fit:contain; }
+.selNome {
+  color:#ffffff; font-size:16px; font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.selCaminhoTxt {
+  color:#7fb6bd; font-size:12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.selRodape { display:flex; align-items:center; gap:10px; margin-top:11px; flex:0 0 auto; }
+.selRodapeRot { color:#cdeef3; font-size:12.5px; white-space:nowrap; }
+.selCaminho { flex:1 1 auto; }
+.selBotoes { display:flex; justify-content:flex-end; gap:10px; margin-top:13px; flex:0 0 auto; }
+.selBtn {
+  padding:8px 26px; border-radius:6px; font-size:13px; font-weight:600;
+  font-family:inherit; cursor:pointer;
+  border:1px solid #1d6a74; background:#0b3a41; color:#e8fbfd;
+}
+.selBtn:hover { background:#10505a; }
+.selPri { background:#0f5f66; }
+.selPri:hover { background:#147a83; }
+.selMsg { color:#c0504a; font-size:12px; min-height:16px; margin-top:6px; }
