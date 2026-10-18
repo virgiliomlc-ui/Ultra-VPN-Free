@@ -9572,6 +9572,19 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             catch { return null; }
         }
 
+        // quadrado de cantos arredondados (o "azulejo" do icone na lista)
+        static GraphicsPath CaminhoArredondado(Rectangle r, int raio)
+        {
+            var p = new GraphicsPath();
+            int d = raio * 2;
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
         string EscolherPrograma()
         {
             // SOMENTE os programas INSTALADOS - a mesma lista do "Programas
@@ -9625,7 +9638,7 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             grade.HideSelection = true;
             grade.ShowItemToolTips = true;
             grade.HeaderStyle = ColumnHeaderStyle.Nonclickable;
-            grade.Font = new Font("Segoe UI", 11.5F);
+            grade.OwnerDraw = true;   // pintado a mao, igual a previa aprovada
             grade.Columns.Add("Programa", 300);
             grade.Columns.Add("Caminho", 440);
             grade.BackColor = Color.FromArgb(4, 13, 15);
@@ -9633,7 +9646,7 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var icones = new ImageList();
             icones.ImageSize = new Size(48, 48);
             icones.ColorDepth = ColorDepth.Depth32Bit;
-            grade.SmallImageList = icones;
+            grade.SmallImageList = icones;   // so para a ALTURA das linhas
             grade.Location = new Point(12, 66);
             grade.Size = new Size(740, 430);
             dlg.Controls.Add(grade);
@@ -9778,6 +9791,99 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                 catch { }
                 finally { try { grade.EndUpdate(); } catch { } }
             };
+            // ---- pintura da lista, identica a previa aprovada ----
+            var fNome = new Font("Segoe UI", 12.5F, FontStyle.Bold);
+            var fCaminho = new Font("Segoe UI", 9.5F);
+            var fCabecalho = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            int hoverIdx = -1;
+            grade.MouseMove += delegate (object s, MouseEventArgs ev2)
+            {
+                var it = grade.GetItemAt(ev2.X, ev2.Y);
+                int novo = it == null ? -1 : it.Index;
+                if (novo != hoverIdx)
+                {
+                    hoverIdx = novo;
+                    try { grade.Invalidate(); } catch { }
+                }
+            };
+            grade.MouseLeave += delegate
+            {
+                if (hoverIdx != -1) { hoverIdx = -1; try { grade.Invalidate(); } catch { } }
+            };
+            grade.DrawColumnHeader += delegate (object s, DrawListViewColumnHeaderEventArgs ev)
+            {
+                // cabecalho escuro: "Programa | Caminho"
+                using (var b = new SolidBrush(Color.FromArgb(6, 33, 37)))
+                    ev.Graphics.FillRectangle(b, ev.Bounds);
+                using (var p = new Pen(Color.FromArgb(18, 51, 56)))
+                    ev.Graphics.DrawLine(p, ev.Bounds.X, ev.Bounds.Bottom - 1, ev.Bounds.Right - 1, ev.Bounds.Bottom - 1);
+                TextRenderer.DrawText(ev.Graphics, ev.Header.Text, fCabecalho,
+                    new Rectangle(ev.Bounds.X + 10, ev.Bounds.Y, ev.Bounds.Width - 12, ev.Bounds.Height),
+                    Color.FromArgb(159, 215, 222),
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
+            grade.DrawItem += delegate (object s, DrawListViewItemEventArgs ev)
+            {
+                // nada aqui: quem pinta cada pedaco e o DrawSubItem abaixo
+            };
+            grade.DrawSubItem += delegate (object s, DrawListViewSubItemEventArgs ev)
+            {
+                var g = ev.Graphics;
+                var bnd = ev.Bounds;
+                var it = ev.Item;
+                bool sel = it.Selected;
+                bool hover = it.Index == hoverIdx && !sel;
+                Color fundo = sel ? Color.FromArgb(13, 65, 73)
+                     : hover ? Color.FromArgb(10, 50, 56)
+                     : (it.Index % 2 == 1 ? Color.FromArgb(5, 20, 26)
+                                          : Color.FromArgb(4, 16, 19));
+                using (var b = new SolidBrush(fundo))
+                    g.FillRectangle(b, bnd);
+                if (sel)
+                    using (var p = new Pen(Color.FromArgb(29, 106, 116)))
+                        g.DrawRectangle(p, bnd.X, bnd.Y, bnd.Width - 1, bnd.Height - 1);
+
+                if (ev.ColumnIndex == 0)
+                {
+                    // ---- icone dentro do quadrado arredondado ----
+                    var cam = (it.Tag as string) ?? "";
+                    int lado = 48;
+                    int tx = bnd.X + 8;
+                    int ty = bnd.Y + (bnd.Height - lado) / 2;
+                    using (var rquery = CaminhoArredondado(new Rectangle(tx, ty, lado, lado), 10))
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        using (var b = new SolidBrush(Color.FromArgb(7, 30, 35)))
+                            g.FillPath(b, rquery);
+                        using (var p = new Pen(Color.FromArgb(18, 51, 56)))
+                            g.DrawPath(p, rquery);
+                    }
+                    try
+                    {
+                        if (icones.Images.ContainsKey(cam))
+                        {
+                            var img = icones.Images[cam];
+                            int li = 38;
+                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g.DrawImage(img, new Rectangle(tx + (lado - li) / 2, ty + (lado - li) / 2, li, li));
+                        }
+                    }
+                    catch { }
+                    // ---- o nome, grande e branco ----
+                    var rn = new Rectangle(tx + lado + 14, bnd.Y, bnd.Width - (tx - bnd.X) - lado - 20, bnd.Height);
+                    TextRenderer.DrawText(g, it.Text, fNome, rn, Color.White,
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+                }
+                else
+                {
+                    // ---- o caminho, menor e cinza ----
+                    var cam = (it.Tag as string) ?? "";
+                    var rc = new Rectangle(bnd.X + 6, bnd.Y, bnd.Width - 10, bnd.Height);
+                    TextRenderer.DrawText(g, cam, fCaminho, rc, Color.FromArgb(127, 182, 189),
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PathEllipsis);
+                }
+            };
+
             dlg.Shown += delegate
             {
                 // grade no tema escuro (barra de rolagem inclusive)
@@ -9794,6 +9900,9 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             {
                 try { pintor.Stop(); } catch { }
                 try { icones.Dispose(); } catch { }
+                try { fNome.Dispose(); } catch { }
+                try { fCaminho.Dispose(); } catch { }
+                try { fCabecalho.Dispose(); } catch { }
             };
 
             dlg.ShowDialog(this);
