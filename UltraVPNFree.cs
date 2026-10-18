@@ -6706,6 +6706,7 @@ Bitmap MontarFundoCover()
         void VerificarConexaoReal()
         {
             try { if (saindo || disposing) return; } catch { return; }
+            try { conferenciasNoCiclo++; } catch { }
             var alvo = new List<Servidor>();
             try { foreach (var s in servers) if (s != null) alvo.Add(s); }
             catch { return; }
@@ -6784,13 +6785,15 @@ Bitmap MontarFundoCover()
             AgendarProximaConferencia();
         }
 
-        // repete o ciclo: alguns segundos depois roda a conferencia de novo,
-        // pegando o que chegou das fontes depois da primeira
+        // repete o ciclo UMA vez (o usuario pediu duas conferencias por
+        // ciclo): quando a lista e conferida, so se marca a segunda - a
+        // terceira em diante fica para a proxima atualizacao das fontes.
         void AgendarProximaConferencia()
         {
             try
             {
                 if (saindo || disposing) return;
+                if (conferenciasNoCiclo >= 2) return;   // ja conferiu as duas vezes
                 // o Timer do Windows Forms so dispara na thread que tem laco
                 // de mensagens: criado em thread de fundo ele nunca toca.
                 Action agendar = delegate
@@ -6891,6 +6894,7 @@ Bitmap MontarFundoCover()
             // a cada busca de fontes (ao abrir e a cada 10 min) a lista volta
             // a ser conferida E a ter ping e velocidade medidos de novo
             try { medirAoConferir = true; } catch { }
+            try { conferenciasNoCiclo = 0; } catch { }   // duas conferencias por ciclo
             ThreadPool.QueueUserWorkItem(delegate
             {
                 try
@@ -7332,6 +7336,7 @@ Bitmap MontarFundoCover()
         System.Windows.Forms.Timer cicloTimer;            // repete a conferencia de conexao
         bool medindo = false;                            // medicao de ping/velocidade em andamento
         bool medirAoConferir = true;                     // mede ping+velocidade depois da conferencia
+        int conferenciasNoCiclo = 0;                     // 2 conferencias por ciclo (abrir/atualizar)
         Task<string> dlEspelho2 = null;
         DateTime dlEsp2Start = DateTime.MinValue;
 
