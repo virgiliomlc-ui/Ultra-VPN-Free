@@ -9576,27 +9576,42 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         {
             // 1) programas INSTALADOS - a lista do "Programas e Recursos"
             var lista = ProgramasInstalados();
-            var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in lista) usados.Add(p[1]);
 
             // 2) + os .exe achados nas pastas de programas (Steam, Discord,
             //    jogos e apps sem entrada propria) e os abertos agora
+            var caminhos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in lista) caminhos.Add(p[1]);
             foreach (var kv in Candidatos())
             {
-                if (usados.Contains(kv.Key)) continue;
+                if (caminhos.Contains(kv.Key)) continue;
                 var fn = Path.GetFileName(kv.Key) ?? "";
                 if (String.Equals(kv.Key, Store.ExePath, StringComparison.OrdinalIgnoreCase)) continue;
                 if (fn.StartsWith("unins", StringComparison.OrdinalIgnoreCase)) continue;
                 if (fn.StartsWith("setup", StringComparison.OrdinalIgnoreCase)) continue;
                 if (fn.StartsWith("update", StringComparison.OrdinalIgnoreCase)) continue;
-                usados.Add(kv.Key);
+                caminhos.Add(kv.Key);
                 lista.Add(new[] { kv.Value, kv.Key });
             }
-            var items = lista
+
+            // 3) SEM repetidos: um item por NOME e um por .exe. O primeiro que
+            //    entra ganha - e os instalados do registro vem primeiro, com
+            //    o nome bonito que o Windows mostra.
+            var caminhoVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var exeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nomeVisto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var items = new List<string[]>();
+            foreach (var p in lista
                 .OrderBy(p => p[0], StringComparer.OrdinalIgnoreCase)
-                .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase)
-                .Take(600)
-                .ToList();
+                .ThenBy(p => p[1], StringComparer.OrdinalIgnoreCase))
+            {
+                if (!caminhoVisto.Add(p[1])) continue;
+                var fn = Path.GetFileNameWithoutExtension(p[1]) ?? "";
+                if (!exeVisto.Add(fn)) continue;
+                var n = String.IsNullOrWhiteSpace(p[0]) ? fn : p[0].Trim();
+                if (!nomeVisto.Add(n)) continue;
+                items.Add(new[] { n, p[1] });
+            }
+            if (items.Count > 600) items = items.Take(600).ToList();
 
             var dlg = new Form();
             dlg.Text = "Escolha o programa";
@@ -9622,18 +9637,22 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             dlg.Controls.Add(filtro);
 
             var grade = new ListView();
-            grade.View = View.LargeIcon;
-            grade.Location = new Point(12, 66);
-            grade.Size = new Size(740, 380);
+            grade.View = View.Details;
+            grade.FullRowSelect = true;
             grade.MultiSelect = false;
             grade.HideSelection = true;
             grade.ShowItemToolTips = true;
+            grade.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            grade.Columns.Add("Programa", 250);
+            grade.Columns.Add("Caminho", 480);
             grade.BackColor = Color.FromArgb(4, 13, 15);
             grade.ForeColor = CorTexto;
             var icones = new ImageList();
-            icones.ImageSize = new Size(48, 48);
+            icones.ImageSize = new Size(24, 24);
             icones.ColorDepth = ColorDepth.Depth32Bit;
-            grade.LargeImageList = icones;
+            grade.SmallImageList = icones;
+            grade.Location = new Point(12, 66);
+            grade.Size = new Size(740, 380);
             dlg.Controls.Add(grade);
 
             // A grade ja abre CHEIA de nomes (rapido). Os icones entram por
@@ -9684,13 +9703,13 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                         try
                         {
                             using (var orig = ((Icon)par[1]).ToBitmap())
-                            using (var b = new Bitmap(48, 48))
+                            using (var b = new Bitmap(24, 24))
                             {
                                 using (var g = Graphics.FromImage(b))
                                 {
                                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                                     g.Clear(Color.Transparent);
-                                    g.DrawImage(orig, new Rectangle(0, 0, 48, 48));
+                                    g.DrawImage(orig, new Rectangle(0, 0, 24, 24));
                                 }
                                 icones.Images.Add(cam, b);
                             }
