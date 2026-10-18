@@ -850,6 +850,10 @@ namespace UltraVPN
         // formato diferente (country_code + openvpn_config_base64). Foi ele
         // que trouxe Peru e Paraguai quando o primeiro espelho veio vazio.
         public const string Espelho2Url = "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/main/data/servers.json";
+        // nomes dos repositorios dos dois espelhos (a descoberta de fontes
+        // usa para nao testar duas vezes o mesmo)
+        public const string EspelhoGithub = "9xN/auto-ovpn";
+        public const string Espelho2Github = "GeorgeXie2333/vpngate-list-mirror";
         public const string PvlUrl = "https://publicvpnlist.com";
         public const string TlxUrl = "https://telexy.net/api/v1";
         public const string VpnBookUser = "vpnbook";
@@ -6039,6 +6043,7 @@ Bitmap MontarFundoCover()
             };
             foreach (var s in gateServers) entrar(s);
             foreach (var s in gateSalvo) entrar(s);      // lista conferida do ultimo ciclo
+            foreach (var s in gateDescoberto) entrar(s);  // fontes descobertas na busca
             foreach (var s in gateEspelho) entrar(s);   // reserva: mesmos servidores por outro caminho
             foreach (var s in gateEspelho2) entrar(s);  // segundo espelho, formato novo
             foreach (var s in pvlServers) entrar(s);
@@ -6526,6 +6531,112 @@ Bitmap MontarFundoCover()
         }
 
         // ============================================================
+        //  DESCOBERTA DE FONTES (quantas existirem por la fora)
+        // ============================================================
+        //  Em vez de uma fonte solitaria, o programa procura sozinho
+        //  espelhos e listas de VPN Gate publicados no GitHub, baixa o que
+        //  cada um tem e fica com a America do Sul que veio. Como os
+        //  espelhos se revezam (um cai, outro cobre), isso mantem a lista
+        //  cheia sem depender de nenhum endereco fixo. Cada payload e
+        //  lido pelo parser do formato (CSV do VPN Gate, JSON antigo e
+        //  JSON novo) e so entra quem tem .ovpn.
+        void DescobrirFontes()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    if (saindo || disposing) return;
+                    // 1) quais repositorios existem agora
+                    var achados = PegarTexto("https://api.github.com/search/repositories?q=vpngate+mirror&sort=updated&per_page=8", 20000);
+                    if (String.IsNullOrWhiteSpace(achados)) return;
+                    var repos = new List<string>();
+                    foreach (Match rm in Regex.Matches(achados, "\"full_name\"\\s*:\\s*\"([^\"]+)\""))
+                    {
+                        var nome = rm.Groups[1].Value;
+                        if (String.IsNullOrEmpty(nome)) continue;
+                        repos.Add(nome);
+                    }
+                    // os dois que ja sao usados entram na frente (ja sabemos
+                    // que respondem); os outros sao novidade
+                    repos.Remove(Dados.EspelhoGithub);
+                    repos.Remove(Dados.Espelho2Github);
+                    repos.Insert(0, Dados.Espelho2Github);
+                    repos.Insert(0, Dados.EspelhoGithub);
+                    int testados = 0;
+                    var reposQueDeram = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var repo in repos)
+                    {
+                        if (testados >= 10) break;
+                        var partes = repo.Split('/');
+                        if (partes.Length < 2) continue;
+                        var user = partes[0];
+                        var nomeRepo = partes[1];
+                        testados++;
+                        // cada espelho publica o mesmo dado em nomes diferentes,
+                        // e o branch pode ser "main" ou "master"
+                        foreach (var branch in new[] { "main", "master" })
+                        foreach (var caminho in new[] {
+                            "data/servers.json",   // formato novo (country_code)
+                            "json/data.json",      // formato do espelho antigo
+                            "data/vpngate.csv",    // CSV do VPN Gate
+                            "vpngate.csv",
+                            "vpngate.txt" })
+                        {
+                            var url = "https://raw.githubusercontent.com/" + user + "/" + nomeRepo + "/" + branch + "/" + caminho;
+                            string txt = null;
+                            try { txt = PegarTexto(url, 15000); } catch { txt = null; }
+                            // pagina de erro do GitHub nao e lista
+                            if (String.IsNullOrWhiteSpace(txt)) continue;
+                            var comeco = txt.TrimStart();
+                            if (comeco.StartsWith("404") || comeco.StartsWith("<!DOCTYPE") || comeco.StartsWith("<html")) continue;
+                            List<Servidor> novos = null;
+                            // JSON (novo ou antigo) - tenta os dois formatos
+                            if (comeco.StartsWith("{") || comeco.StartsWith("["))
+                            {
+                                novos = Rede.ParseEspelho2Json(txt);
+                                if (novos.Count == 0) novos = Rede.ParseEspelhoJson(txt);
+                            }
+                            else
+                            {
+                                // CSV do VPN Gate: a primeira linha e cabecalho
+                                var linhasCsv = txt.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                                var corpo = new List<string>();
+                                for (int li = 0; li < linhasCsv.Length; li++)
+                                {
+                                    var ln = linhasCsv[li].TrimStart('\uFEFF');
+                                    if (ln.StartsWith("#HostName") || ln.StartsWith("*vpn_servers")) continue;
+                                    if (String.IsNullOrWhiteSpace(ln)) continue;
+                                    corpo.Add(ln);
+                                }
+                                if (corpo.Count > 0) novos = Rede.ConvertToServers(String.Join("\r\n", corpo.ToArray()), false);
+                            }
+                            if (novos != null && novos.Count > 0)
+                            {
+                                if (!reposQueDeram.Add(user + "/" + nomeRepo)) continue;   // mesmo repo, outro branch
+                                lock (gateDescoberto)
+                                {
+                                    foreach (var s in novos) gateDescoberto.Add(s);
+                                }
+                                try { Log("Fonte descoberta: " + user + "/" + nomeRepo + " (" + branch + "/" + caminho + ") - " + novos.Count + " da America do Sul."); } catch { }
+                                break;   // esse repositorio ja deu
+                            }
+                        }
+                    }
+                    // junta tudo o que veio das fontes novas
+                    var juntados = new List<Servidor>(gateDescoberto);
+                    gateDescoberto = juntados;
+                    if (juntados.Count > 0)
+                    {
+                        try { Log("Fontes descobertas: " + juntados.Count + " servidores da America do Sul no total."); } catch { }
+                        CombinarGate(-1, -1, gateEspelho.Count);
+                    }
+                }
+                catch { }
+            });
+        }
+
+        // ============================================================
         //  MEDIR PING E VELOCIDADE (botao "Medir ping" + automatico)
         // ============================================================
         //  O botao "Medir ping" mede PING E VELOCIDADE: primeiro o tempo de
@@ -6918,6 +7029,9 @@ Bitmap MontarFundoCover()
                     // ---------- 2) VPN Gate + telexy + lista publica + hunt ----------
                     try { IniciarFontesPublicas(); } catch { }
                     try { if (dlTask == null || dlTask.IsCompleted) BaixarListaServidores(); } catch { }
+                    // e a busca de fontes: caça quantos espelhos/listas de VPN
+                    // Gate existirem no mundo e traz a America do Sul de todos
+                    try { DescobrirFontes(); } catch { }
                     // a busca das fontes publicas agora e auto-contida (roda
                     // sozinha numa thread e so entao avisa a tela): nao ha mais
                     // fila para esperar aqui
@@ -7333,6 +7447,7 @@ Bitmap MontarFundoCover()
         List<Servidor> gateEspelho = new List<Servidor>();
         List<Servidor> gateEspelho2 = new List<Servidor>();
         List<Servidor> gateSalvo = new List<Servidor>();   // lista conferida do ultimo ciclo
+        List<Servidor> gateDescoberto = new List<Servidor>(); // o que a busca de fontes trouxe
         System.Windows.Forms.Timer cicloTimer;            // repete a conferencia de conexao
         bool medindo = false;                            // medicao de ping/velocidade em andamento
         bool medirAoConferir = true;                     // mede ping+velocidade depois da conferencia
