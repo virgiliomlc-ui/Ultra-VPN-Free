@@ -9597,13 +9597,13 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
 
             var dlg = new Form();
             dlg.Text = "Escolha o programa";
-            dlg.Size = new Size(780, 660);
-            dlg.StartPosition = FormStartPosition.CenterParent;
+            dlg.Size = new Size(780, 700);
+            dlg.StartPosition = FormStartPosition.CenterScreen;   // centro da TELA
             dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
             dlg.MinimizeBox = false;
             dlg.MaximizeBox = false;
             dlg.ShowInTaskbar = false;
-            dlg.Font = new Font("Segoe UI", 10);
+            dlg.Font = new Font("Segoe UI", 10.5F);
             dlg.BackColor = Color.FromArgb(4, 13, 15);
 
             var lbl1 = new Label();
@@ -9625,16 +9625,17 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             grade.HideSelection = true;
             grade.ShowItemToolTips = true;
             grade.HeaderStyle = ColumnHeaderStyle.Nonclickable;
-            grade.Columns.Add("Programa", 250);
-            grade.Columns.Add("Caminho", 480);
+            grade.Font = new Font("Segoe UI", 11.5F);
+            grade.Columns.Add("Programa", 300);
+            grade.Columns.Add("Caminho", 440);
             grade.BackColor = Color.FromArgb(4, 13, 15);
             grade.ForeColor = CorTexto;
             var icones = new ImageList();
-            icones.ImageSize = new Size(32, 32);
+            icones.ImageSize = new Size(48, 48);
             icones.ColorDepth = ColorDepth.Depth32Bit;
             grade.SmallImageList = icones;
             grade.Location = new Point(12, 66);
-            grade.Size = new Size(740, 380);
+            grade.Size = new Size(740, 430);
             dlg.Controls.Add(grade);
 
             // A grade ja abre CHEIA de nomes (rapido). Os icones entram por
@@ -9685,13 +9686,13 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
                         try
                         {
                             using (var orig = ((Icon)par[1]).ToBitmap())
-                            using (var b = new Bitmap(32, 32))
+                            using (var b = new Bitmap(48, 48))
                             {
                                 using (var g = Graphics.FromImage(b))
                                 {
                                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                                     g.Clear(Color.Transparent);
-                                    g.DrawImage(orig, new Rectangle(0, 0, 32, 32));
+                                    g.DrawImage(orig, new Rectangle(0, 0, 48, 48));
                                 }
                                 icones.Images.Add(cam, b);
                             }
@@ -9706,17 +9707,17 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var lbl2 = new Label();
             lbl2.Text = "Ou digite o caminho do arquivo .exe:";
             lbl2.ForeColor = CorTexto;
-            lbl2.Location = new Point(12, 458);
+            lbl2.Location = new Point(12, 508);
             lbl2.Size = new Size(740, 20);
             dlg.Controls.Add(lbl2);
 
             var txt = new TextBox();
-            txt.Location = new Point(12, 480);
+            txt.Location = new Point(12, 534);
             txt.Size = new Size(740, 26);
             dlg.Controls.Add(txt);
 
             var lblMsg = new Label();
-            lblMsg.Location = new Point(12, 512);
+            lblMsg.Location = new Point(12, 566);
             lblMsg.Size = new Size(740, 20);
             lblMsg.ForeColor = Color.Firebrick;
             dlg.Controls.Add(lblMsg);
@@ -9724,14 +9725,14 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
             var btnOk = new Button();
             btnOk.Text = "Escolher";
             btnOk.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-            btnOk.Location = new Point(500, 546);
+            btnOk.Location = new Point(500, 600);
             btnOk.Size = new Size(120, 32);
             btnOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             dlg.Controls.Add(btnOk);
 
             var btnCancel = new Button();
             btnCancel.Text = "Cancelar";
-            btnCancel.Location = new Point(632, 546);
+            btnCancel.Location = new Point(632, 600);
             btnCancel.Size = new Size(120, 32);
             btnCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             dlg.Controls.Add(btnCancel);
