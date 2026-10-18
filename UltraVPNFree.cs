@@ -3458,7 +3458,8 @@ public static string UrbanGetServers(string accsToken)
             btnPing.Text = "Medir ping";
             btnPing.Location = new Point(410, 72);
             btnPing.Size = new Size(94, 28);
-            btnPing.Visible = false;   // guardado: o usuario vai usar mais tarde
+            btnPing.Visible = true;   // ping E velocidade
+            btnPing.Click += delegate { MedirTudo(true); };
             Controls.Add(btnPing);
 
             // ---------------- tipo de tunel ----------------
@@ -4367,7 +4368,7 @@ void MandarPaises()
                             return;
                         }
                     case "atualizar": TelaAtualizar(); return;
-                    case "medirPing": return;   // botao guardado para uso futuro
+                    case "medirPing": MedirTudo(true); return;
                     case "mudarPais":
                         {
                             object v; m.TryGetValue("iso", out v);
@@ -6525,6 +6526,169 @@ Bitmap MontarFundoCover()
         }
 
         // ============================================================
+        //  MEDIR PING E VELOCIDADE (botao "Medir ping" + automatico)
+        // ============================================================
+        //  O botao "Medir ping" mede PING E VELOCIDADE: primeiro o tempo de
+        //  resposta de cada servidor da lista (TCP: aperto de mao cronome-
+        //  trado; UDP: o PING do proprio OpenVPN) e depois a velocidade que
+        //  cada fonte mediu e publica. Roda sozinho logo depois da
+        //  conferencia de conexao (ao abrir e a cada atualizacao da lista) e
+        //  de novo a cada clique no botao.
+        void MedirTudo(bool manual)
+        {
+            try { if (saindo || disposing) return; } catch { return; }
+            if (medindo) return;
+            var alvo = new List<Servidor>();
+            try { foreach (var s in servers) if (s != null) alvo.Add(s); } catch { return; }
+            if (alvo.Count == 0) return;
+            medindo = true;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    // ---- 1) ping de todos ao mesmo tempo ----
+                    Dictionary<string, int> rtt = null;
+                    try { rtt = Rede.MedirRtts(alvo); } catch { }
+                    int responderam = 0;
+                    foreach (var s in servers)
+                    {
+                        if (s == null) continue;
+                        int ms;
+                        if (rtt != null && rtt.TryGetValue(s.IP, out ms) && ms >= 0)
+                        {
+                            s.Measured = ms;
+                            RegistrarPing(s.IP, ms);
+                            responderam++;
+                        }
+                        else s.Measured = -1;
+                    }
+
+                    // ---- 2) velocidade (o que cada fonte mediu) ----
+                    int comVel = MedirVelocidades();
+
+                    Action pintar = delegate
+                    {
+                        try { if (sortCol < 0) OrdenarPadrao(); } catch { }
+                        try { AtualizarLista(); } catch { }
+                        try { EnviarLista(); } catch { }
+                        try { SalvarListaEmDisco(); } catch { }
+                        medindo = false;
+                        if (manual)
+                        {
+                            try
+                            {
+                                Log("Ping e velocidade medidos: " + responderam + " servidores responderam, "
+                                    + comVel + " com velocidade.");
+                            }
+                            catch { }
+                        }
+                    };
+                    try { if (InvokeRequired) BeginInvoke(pintar); else pintar(); }
+                    catch { medindo = false; }
+                }
+                catch { medindo = false; }
+            });
+        }
+
+        // Velocidade: cada fonte publica mede e manda (o telexy e a lista
+        // publica trazem a velocidade por servidor). O programa relê a
+        // pagina de cada pais que esta na lista e preenche a coluna.
+        int MedirVelocidades()
+        {
+            int atualizados = 0;
+            try
+            {
+                if (saindo || disposing) return 0;
+                var paisNaLista = new List<string>();
+                var vistosIso = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var s in servers)
+                    if (s != null && !String.IsNullOrEmpty(s.ISO) && vistosIso.Add(s.ISO)) paisNaLista.Add(s.ISO);
+                if (paisNaLista.Count == 0) return 0;
+
+                var vel = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                var lote = new List<Thread>();
+                foreach (var iso in paisNaLista)
+                {
+                    var isoLocal = iso;
+                    var t = new Thread(new ThreadStart(delegate
+                    {
+                        try
+                        {
+                            foreach (var p in Dados.PvlPaises)
+                            {
+                                if (!String.Equals(p.ISO, isoLocal, StringComparison.OrdinalIgnoreCase)) continue;
+                                try
+                                {
+                                    var txt = PegarTexto(Dados.TlxUrl + "/vpn?country=" + isoLocal + "&limit=50", 20000);
+                                    if (!String.IsNullOrWhiteSpace(txt))
+                                        foreach (var ns in Rede.ParseTlxJson(txt, isoLocal))
+                                            if (ns != null && ns.Speed > 0) { lock (vel) vel[ns.IP] = ns.Speed; }
+                                }
+                                catch { }
+                                if (p.TemPvl && !String.IsNullOrEmpty(p.Slug))
+                                {
+                                    try
+                                    {
+                                        var txt2 = PegarTexto(Dados.PvlUrl + "/country/" + p.Slug + "/", 20000);
+                                        if (!String.IsNullOrWhiteSpace(txt2))
+                                            foreach (var ns in Rede.ParsePvlPage(txt2, isoLocal))
+                                                if (ns != null && ns.Speed > 0) { lock (vel) vel[ns.IP] = ns.Speed; }
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                        catch { }
+                    }));
+                    t.IsBackground = true;
+                    t.Start();
+                    lote.Add(t);
+                    if (lote.Count >= 4)
+                    {
+                        foreach (var x in lote) { try { x.Join(22000); } catch { } }
+                        lote.Clear();
+                    }
+                }
+                foreach (var x in lote) { try { x.Join(22000); } catch { } }
+
+                foreach (var s in servers)
+                {
+                    if (s == null) continue;
+                    long v;
+                    if (vel.TryGetValue(s.IP, out v) && v > 0)
+                    {
+                        s.Speed = v;
+                        atualizados++;
+                    }
+                }
+                if (atualizados == 0)
+                {
+                    // nenhuma fonte respondeu com velocidade: o que a lista
+                    // ja tinha continua valendo (velocidade de antes)
+                    foreach (var s in servers)
+                        if (s != null && s.Speed > 0) atualizados++;
+                }
+            }
+            catch { }
+            return atualizados;
+        }
+
+        // guarda o ping no historico do IP (a coluna usa para o grafico e
+        // para nao perder a medida quando a lista e reconstruida)
+        void RegistrarPing(string ip, int ms)
+        {
+            try
+            {
+                if (String.IsNullOrWhiteSpace(ip) || ms < 0) return;
+                List<int> h;
+                if (!pingHist.TryGetValue(ip, out h) || h == null) { h = new List<int>(); pingHist[ip] = h; }
+                h.Add(ms);
+                while (h.Count > 24) h.RemoveAt(0);
+            }
+            catch { }
+        }
+
+        // ============================================================
         //  CONFERENCIA DE CONEXAO REAL (ao abrir e a cada 10 min)
         // ============================================================
         //  Ciclo completo, repetido para sempre:
@@ -6605,6 +6769,16 @@ Bitmap MontarFundoCover()
                 try { if (InvokeRequired) BeginInvoke(aplicar); else aplicar(); } catch { }
                 Log("Conexao conferida: " + verificados.Count + " de " + alvo.Count
                     + " servidores da America do Sul tem conexao certa (o resto saiu da lista).");
+            }
+            catch { }
+            // assim que a conexao e conferida, mede ping e velocidade de tudo
+            try
+            {
+                if (medirAoConferir)
+                {
+                    medirAoConferir = false;
+                    MedirTudo(false);
+                }
             }
             catch { }
             AgendarProximaConferencia();
@@ -6714,6 +6888,9 @@ Bitmap MontarFundoCover()
         void RevalidarFontes()
         {
             try { if (saindo || disposing) return; } catch { return; }
+            // a cada busca de fontes (ao abrir e a cada 10 min) a lista volta
+            // a ser conferida E a ter ping e velocidade medidos de novo
+            try { medirAoConferir = true; } catch { }
             ThreadPool.QueueUserWorkItem(delegate
             {
                 try
@@ -7153,6 +7330,8 @@ Bitmap MontarFundoCover()
         List<Servidor> gateEspelho2 = new List<Servidor>();
         List<Servidor> gateSalvo = new List<Servidor>();   // lista conferida do ultimo ciclo
         System.Windows.Forms.Timer cicloTimer;            // repete a conferencia de conexao
+        bool medindo = false;                            // medicao de ping/velocidade em andamento
+        bool medirAoConferir = true;                     // mede ping+velocidade depois da conferencia
         Task<string> dlEspelho2 = null;
         DateTime dlEsp2Start = DateTime.MinValue;
 
