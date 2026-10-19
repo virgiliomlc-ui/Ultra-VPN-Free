@@ -4091,7 +4091,7 @@ public static string UrbanGetServers(string accsToken)
                 Conectar();
             };
             updateTimer = new System.Windows.Forms.Timer();
-            updateTimer.Interval = 3 * 60 * 60 * 1000;      // 3 horas
+            updateTimer.Interval = 15 * 60 * 1000;      // 15 minutos
             // a checagem baixa da internet (trava segundos na thread da janela):
             // roda fora dela e so encosta na tela no final
             updateTimer.Tick += delegate {
@@ -7788,7 +7788,9 @@ Bitmap MontarFundoCover()
 
         // Procura versao nova fora da thread da janela (a consulta de rede
         // trava segundos). E chamada ao abrir o programa e de tempos em
-        // tempos: o botao de atualizar so aparece - e so diz algo - quando ha
+        // tempos, de 15 em 15 minutos: o GitHub demora alguns minutos para
+        // difundir o versao.txt depois de um lancamento, e assim o botao
+        // aparece logo. O botao so aparece - e so diz algo - quando ha
         // versao nova DE VERDADE, ou seja, quando o numero do GitHub e maior
         // que o daqui (1.5.0 -> 1.6.0 -> 1.7.0...).
         void ProcurarVersaoNova()
