@@ -7367,6 +7367,9 @@ Bitmap MontarFundoCover()
         {
             vigiaTick = (vigiaTick + 1) % 15;
             if (vigiaTick == 5) { try { EscurecerRolagens(); } catch { } }
+            // o Discord tambem e uma janela que nao obedece ao "Mostrar area
+            // de trabalho" (e uma janela do Chromium, como a nossa tela)
+            try { CuidarDoDiscord(); } catch { }
             if (connected && btnConnect.Enabled)
             {
                 if (vigiaTick == 0)
@@ -8355,6 +8358,7 @@ Bitmap MontarFundoCover()
                 if (!primeiraConexaoFeita)
                 {
                     primeiraConexaoFeita = true;
+                    DiscordSobOlho = true;   // passa a cuidar da janela do Discord
                     ReiniciarOuAbrirDiscord();
                 }
                 else
@@ -8561,6 +8565,7 @@ Bitmap MontarFundoCover()
         [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
         [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int n);
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
 
         static bool EhMaximizado(IntPtr h) { try { return IsZoomed(h); } catch { return false; } }
         static bool EstaMinimizado(IntPtr h) { try { return IsIconic(h); } catch { return false; } }
@@ -8582,6 +8587,49 @@ Bitmap MontarFundoCover()
             }
             catch { }
             return IntPtr.Zero;
+        }
+
+        // ============================================================
+        //  DISCORD MAXIMIZADO QUE SAI DE CENA -> MINIMIZA
+        // ============================================================
+        // O mesmo problema do Ultra VPN Free acontece com o Discord: ele e
+        // uma janela do Chromium (Electron) e o Windows NAO minimiza ela no
+        // "Mostrar area de trabalho". Ela continua marcada como maximizada
+        // para o Windows, e o Wallpaper Engine - que pausa a animacao do
+        // papel de parede enquanto houver janela maximizada - segura a
+        // imagem parada mesmo depois da janela sair de cena.
+        //
+        // Aqui o programa cuida do Discord do mesmo jeito que cuida da
+        // propria janela: se ele estiver MAXIMIZADO e perder o foco (a
+        // pessoa clicou na area de trabalho, em outro programa...), ele
+        // minimiza de verdade. So para quando a pessoa deixa de maximiza-lo
+        // por conta propria.
+        bool DiscordSobOlho = false;      // ligado depois da 1a conexao
+        int ticksDiscord = 0;             // quantas vezes ficou sem foco
+        bool discordTeveFoco = false;     // ja esteve em foco nesta sessao
+
+        void CuidarDoDiscord()
+        {
+            try
+            {
+                if (!DiscordSobOlho) return;
+                var j = JanelaDiscord();
+                if (j == IntPtr.Zero) { ticksDiscord = 0; discordTeveFoco = false; return; }
+                if (EstaMinimizado(j) || !EhMaximizado(j)) { ticksDiscord = 0; discordTeveFoco = false; return; }
+                if (GetForegroundWindow() == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
+                // so minimiza se a janela JA esteve em foco e a pessoa saiu
+                // dela de proposito (clicou na area de trabalho, em outro
+                // programa...). Maximizar em segundo plano, sem focar, nao e
+                // mexido - seria atrapalhar a pessoa.
+                if (!discordTeveFoco) return;
+                ticksDiscord++;
+                if (ticksDiscord >= 3)
+                {
+                    ticksDiscord = 0;
+                    MostrarJanela(j, 6);   // SW_MINIMIZE
+                }
+            }
+            catch { }
         }
 
         void AtualizarEstadoConexao()
