@@ -8340,31 +8340,36 @@ Bitmap MontarFundoCover()
             if (connected)
             {
                 reAuto = 0;
-                // NAO fecha mais o Discord sozinho ao conectar.
+                // Fecha e abre o Discord, como sempre foi: e o jeito de fazer
+                // as conexoes dele nascurem dentro do tunel (as rotas valem,
+                // mas as conexoes ja abertas, presas no caminho antigo, so se
+                // renovam quando o app reinicia).
                 //
-                // Era este o segundo jeito de travar o papel de parede do
-                // Wallpaper Engine: o programa matava o Discord na forca
-                // (ele se esconde na bandeja em vez de sair, entao so com
-                // Kill mesmo) e abria de novo. O Discord voltava em janela
-                // maximizada por um instante, e o Wallpaper Engine - que
-                // pausa a animacao enquanto houver janela maximizada - ficava
-                // com a imagem parada mesmo depois de a janela sumir.
-                //
-                // Nao e preciso: as rotas do tunel ja valem para o Discord
-                // aberto (ele continua usando os mesmos enderecos, so que
-                // agora pelo tunel). Se a pessoa quiser recomecar as conexoes
-                // dele, fecha e abre o Discord - ou usa "Reiniciar Discord" no
-                // menu do icone.
-                try
+                // O cuidado esta no COMO o Discord e fechado: antes era
+                // CloseMainWindow + Kill na sequencia, e esse gesto bruto
+                // (matar na forca) deixava o Wallpaper Engine - que acompanha
+                // o Discord - com a animacao do papel de parede parada. Agora
+                // ele e convidado a sair primeiro, so o que sobra e fechado a
+                // forca, e o programa espera ele sumir de verdade antes de
+                // abrir de novo.
+                if (!primeiraConexaoFeita)
                 {
-                    int nDis = 0;
-                    try { nDis = Process.GetProcessesByName("Discord").Length; } catch { }
-                    if (nDis == 0)
-                        Log("Conectado. Se o Discord nao estiver aberto, ele entra pela VPN assim que abrir.");
-                    else
-                        Log("Conectado. O Discord continua aberto e ja passa pela VPN (o texto volta em segundos).");
+                    primeiraConexaoFeita = true;
+                    ReiniciarOuAbrirDiscord();
                 }
-                catch { }
+                else
+                {
+                    // troca de servidor: se o Discord nao estiver rodando,
+                    // abre (ele ja entra pelo tunel); se estiver, deixa quieto
+                    try
+                    {
+                        if (Process.GetProcessesByName("Discord").Length == 0)
+                            ReiniciarOuAbrirDiscord();
+                        else
+                            Log("Discord continua aberto - ele percebe a troca e reconecta sozinho pelo tunel novo (o texto volta em segundos).");
+                    }
+                    catch { }
+                }
             }
             else if (autoRecon && reAuto > 0)
             {
@@ -8443,23 +8448,55 @@ Bitmap MontarFundoCover()
 
         // Fecha e abre o Discord (ou apenas abre se nao estiver rodando).
         // Chamado APENAS na primeira conexao bem-sucedida da sessao.
+        //
+        // REGRA IMPORTANTE: o Discord volta EXATAMENTE no estado em que
+        // estava. Isso nao e vaidade - e o que impede o papel de parede do
+        // Wallpaper Engine de travar: ele pausa a animacao enquanto existir
+        // uma janela MAXIMIZADA na tela, e o Discord, ao voltar, abre
+        // maximizado por conta propria (ele guarda "maximizado" da ultima
+        // vez). Uma janela maximizada que surge sozinha assim deixa a
+        // animacao parada mesmo depois de ela sumir. Se o Discord estava
+        // minimizado, ele volta minimizado; se estava em tamanho normal,
+        // volta em tamanho normal - nunca最大化 por conta do programa.
         void ReiniciarOuAbrirDiscord()
         {
+            bool estavaAberto = false, estavaMaximizado = false, estavaMinimizado = false;
             try
             {
-                // Fecha processos existentes
+                var j0 = JanelaDiscord();
+                if (j0 != IntPtr.Zero)
+                {
+                    estavaAberto = true;
+                    try { estavaMaximizado = EhMaximizado(j0); } catch { }
+                    try { estavaMinimizado = EstaMinimizado(j0); } catch { }
+                }
+            }
+            catch { }
+
+            try
+            {
+                // 1) PEDIR PARA SAIR DE JEITO (o Discord esconde na bandeja
+                //    quando leva WM_CLOSE, entao nem sempre obedece - mas
+                //    quando obedece, sai limpo). Cada tentativa espera.
                 foreach (var p in Process.GetProcessesByName("Discord"))
                 {
-                    try
-                    {
-                        if (!p.HasExited)
-                        {
-                            p.CloseMainWindow();
-                            p.WaitForExit(2000);
-                        }
-                        if (!p.HasExited) p.Kill();
-                    }
+                    try { if (!p.HasExited) { p.CloseMainWindow(); p.WaitForExit(1500); } }
                     catch { }
+                }
+                // 2) O QUE SOBROU vai a forca. So depois de tentar sair bem.
+                foreach (var p in Process.GetProcessesByName("Discord"))
+                {
+                    try { if (!p.HasExited) p.Kill(); }
+                    catch { }
+                }
+                // 3) espera o processo principal realmente sumir antes de abrir
+                //    de novo: abrir enquanto o velho ainda esta saindo faz o
+                //    Electron brigar com ele proprio (e o Wallpaper Engine,
+                //    que acompanha o Discord, se enrola junto).
+                for (int i = 0; i < 30; i++)
+                {
+                    if (Process.GetProcessesByName("Discord").Length == 0) break;
+                    System.Threading.Thread.Sleep(100);
                 }
             }
             catch { }
@@ -8472,12 +8509,66 @@ Bitmap MontarFundoCover()
                 var psi = new ProcessStartInfo(caminho)
                 {
                     UseShellExecute = true,
-                    WindowStyle = ProcessWindowStyle.Normal
+                    WindowStyle = estavaMinimizado ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal
                 };
                 Process.Start(psi);
+                // 4) devolve o Discord ao estado em que ele estava. O
+                //    Electron abre a janela maximizando sozinho (ele lembra
+                //    da ultima vez) - e essa maximizada que surge sem ninguem
+                //    pedir e o que trava a animacao do papel de parede do
+                //    Wallpaper Engine.
+                if (estavaAberto && !estavaMaximizado)
+                {
+                    for (int i = 0; i < 150; i++)
+                    {
+                        System.Threading.Thread.Sleep(100);
+                        var j = JanelaDiscord();
+                        if (j == IntPtr.Zero) continue;
+                        try
+                        {
+                            if (estavaMinimizado)
+                            {
+                                if (!EstaMinimizado(j)) MostrarJanela(j, 6);   // SW_MINIMIZE
+                            }
+                            else if (EhMaximizado(j))
+                            {
+                                MostrarJanela(j, 9);                             // SW_RESTORE
+                            }
+                        }
+                        catch { }
+                        break;
+                    }
+                }
                 Log("Discord reaberto pelo tunel.");
             }
             catch { }
+        }
+
+        // ---------------- janela do Discord ----------------
+        [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+        [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int n);
+
+        static bool EhMaximizado(IntPtr h) { try { return IsZoomed(h); } catch { return false; } }
+        static bool EstaMinimizado(IntPtr h) { try { return IsIconic(h); } catch { return false; } }
+        static void MostrarJanela(IntPtr h, int modo) { try { ShowWindow(h, modo); } catch { } }
+
+        // A janela principal do Discord (a que tem titulo "X - Discord")
+        static IntPtr JanelaDiscord()
+        {
+            try
+            {
+                foreach (var p in Process.GetProcessesByName("Discord"))
+                {
+                    try
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return IntPtr.Zero;
         }
 
         void AtualizarEstadoConexao()
