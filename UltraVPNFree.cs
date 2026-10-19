@@ -7367,9 +7367,6 @@ Bitmap MontarFundoCover()
         {
             vigiaTick = (vigiaTick + 1) % 15;
             if (vigiaTick == 5) { try { EscurecerRolagens(); } catch { } }
-            // o Discord tambem e uma janela que nao obedece ao "Mostrar area
-            // de trabalho" (e uma janela do Chromium, como a nossa tela)
-            try { CuidarDoDiscord(); } catch { }
             if (connected && btnConnect.Enabled)
             {
                 if (vigiaTick == 0)
@@ -8359,6 +8356,7 @@ Bitmap MontarFundoCover()
                 {
                     primeiraConexaoFeita = true;
                     DiscordSobOlho = true;   // passa a cuidar da janela do Discord
+                    try { LigarVigiaDoDiscord(); } catch { }
                     ReiniciarOuAbrirDiscord();
                 }
                 else
@@ -8607,6 +8605,23 @@ Bitmap MontarFundoCover()
         bool DiscordSobOlho = false;      // ligado depois da 1a conexao
         int ticksDiscord = 0;             // quantas vezes ficou sem foco
         bool discordTeveFoco = false;     // ja esteve em foco nesta sessao
+        System.Windows.Forms.Timer discoTimer;
+
+        // started junto with the program: the check is fast so that the
+        // wallpaper comes back at the same moment as when our own window
+        // minimizes (that one is instant).
+        void LigarVigiaDoDiscord()
+        {
+            try
+            {
+                if (discoTimer != null) return;
+                discoTimer = new System.Windows.Forms.Timer();
+                discoTimer.Interval = 100;      // 10 vezes por segundo
+                discoTimer.Tick += delegate { try { CuidarDoDiscord(); } catch { } };
+                discoTimer.Start();
+            }
+            catch { }
+        }
 
         void CuidarDoDiscord()
         {
@@ -8616,20 +8631,49 @@ Bitmap MontarFundoCover()
                 var j = JanelaDiscord();
                 if (j == IntPtr.Zero) { ticksDiscord = 0; discordTeveFoco = false; return; }
                 if (EstaMinimizado(j) || !EhMaximizado(j)) { ticksDiscord = 0; discordTeveFoco = false; return; }
-                if (GetForegroundWindow() == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
-                // so minimiza se a janela JA esteve em foco e a pessoa saiu
-                // dela de proposito (clicou na area de trabalho, em outro
-                // programa...). Maximizar em segundo plano, sem focar, nao e
-                // mexido - seria atrapalhar a pessoa.
+                var frente = GetForegroundWindow();
+                if (frente == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
+                // 1) A PESSOA ESTA NA AREA DE TRABALHO: o Windows nao
+                // minimiza o Discord (janela de Chromium, igual a nossa tela)
+                // e o Wallpaper Engine continua vendo uma janela maximizada.
+                // Aqui minimiza na hora - semespera nenhuma.
+                if (EhAreaDeTrabalho(frente))
+                {
+                    MostrarJanela(j, 6);   // SW_MINIMIZE
+                    ticksDiscord = 0;
+                    return;
+                }
+                // 2) saida de cena normal: so minimiza se a janela ja esteve
+                // em foco (maximizar em segundo plano, sem focar, nao e
+                // mexido - seria atrapalhar a pessoa).
                 if (!discordTeveFoco) return;
                 ticksDiscord++;
-                if (ticksDiscord >= 3)
+                if (ticksDiscord >= 2)          // ~200 ms
                 {
                     ticksDiscord = 0;
-                    MostrarJanela(j, 6);   // SW_MINIMIZE
+                    MostrarJanela(j, 6);
                 }
             }
             catch { }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int GetClassName(IntPtr h, System.Text.StringBuilder t, int n);
+
+        // a janela da area de trabalho (e as janelas do shell que ficam por
+        // tras dela): quando a pessoa clica em "Mostrar area de trabalho",
+        // uma delas ganha o foco
+        static bool EhAreaDeTrabalho(IntPtr frente)
+        {
+            try
+            {
+                if (frente == IntPtr.Zero) return true;
+                var sb = new System.Text.StringBuilder(64);
+                GetClassName(frente, sb, 64);
+                var c = sb.ToString();
+                return c == "Progman" || c == "WorkerW" || c == "Desktop" || c == "ShellDesktop";
+            }
+            catch { return false; }
         }
 
         void AtualizarEstadoConexao()
