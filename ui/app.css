@@ -86,7 +86,10 @@ thead th .seta { font-size:10px; }
 #dirTopo #ipAtual { color:#4ee6ea; font-weight:600; }
 /* a versao do programa e o botao de atualizacao: discretos, mas legiveis
    nos 3 temas (as cores sao as mesmas do resto da tela) */
-#dirTopo #versaoAtual { color:#7fb9c2; font-size:12px; margin-top:2px; }
+#dirTopo #versaoAtual {
+  color:#39ff88; font-size:12px; margin-top:2px; font-weight:700;
+  text-shadow:0 0 5px rgba(57,255,136,.85), 0 0 12px rgba(57,255,136,.45);
+}
 #btnNovaVersao {
   color:#ffd166; border-color:rgba(255,209,102,.55); font-weight:600;
   animation:piscaAtualiza 1,6s ease-in-out infinite;
