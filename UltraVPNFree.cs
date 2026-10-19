@@ -8506,18 +8506,31 @@ Bitmap MontarFundoCover()
             {
                 var caminho = AcharCaminhoDiscord();
                 if (String.IsNullOrEmpty(caminho) || !File.Exists(caminho)) return;
+                // Se o Discord NAO estava aberto, nao ha estado anterior para
+                // ele entra minimizado (so na barra de tarefas), para
+                // nao aparecer de repente em tela cheia. Se ele estava aberto
+                // minimizado, tambem minimizado.
                 var psi = new ProcessStartInfo(caminho)
                 {
                     UseShellExecute = true,
-                    WindowStyle = estavaMinimizado ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal
+                    WindowStyle = (!estavaAberto || estavaMinimizado)
+                        ? ProcessWindowStyle.Minimized
+                        : ProcessWindowStyle.Normal
                 };
                 Process.Start(psi);
-                // 4) devolve o Discord ao estado em que ele estava. O
-                //    Electron abre a janela maximizando sozinho (ele lembra
-                //    da ultima vez) - e essa maximizada que surge sem ninguem
-                //    pedir e o que trava a animacao do papel de parede do
-                //    Wallpaper Engine.
-                if (estavaAberto && !estavaMaximizado)
+                // 4) DEVOLVE O DISCORD AO ESTADO EM QUE ELE ESTAVA.
+                //
+                // Medido: o Electron abre a janela MAXIMIZADA sozinho (lembra
+                // da ultima vez) - e o Wallpaper Engine pausa a animacao do
+                // papel de parede enquanto existir uma janela maximizada na
+                // tela. Essa maximizada que surge sem ninguem pedir deixava a
+                // imagem parada mesmo depois de a janela sumir. Aqui ele
+                // volta exatamente como estava:
+                //   - estava maximizado  -> fica maximizado (escolha da pessoa)
+                //   - estava normal       -> volta normal
+                //   - estava minimizado   -> volta minimizado
+                //   - estava fechado      -> fica minimizado, na barra
+                if (!estavaMaximizado)
                 {
                     for (int i = 0; i < 150; i++)
                     {
@@ -8526,7 +8539,7 @@ Bitmap MontarFundoCover()
                         if (j == IntPtr.Zero) continue;
                         try
                         {
-                            if (estavaMinimizado)
+                            if (!estavaAberto || estavaMinimizado)
                             {
                                 if (!EstaMinimizado(j)) MostrarJanela(j, 6);   // SW_MINIMIZE
                             }
