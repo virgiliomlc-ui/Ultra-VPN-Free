@@ -3935,8 +3935,27 @@ public static string UrbanGetServers(string accsToken)
             FormClosing += delegate(object snd, FormClosingEventArgs ev)
             {
                 if (exiting) return;                  // foi pedido pelo menu Sair
-                ev.Cancel = true;                     // o X sempre manda para a bandeja
-                IrParaBandeja();
+                ev.Cancel = true;
+                // O "Mostrar area de trabalho" (Win+D) chega aqui como um
+                // pedido de fechamento. Todo programa do PC simplesmente
+                // MINIMIZA; este se escondia na bandeja - e, com a janela
+                // escondida e ainda MAXIMIZADA por dentro, o Windows continuava
+                // contando uma janela maximizada na tela. O Wallpaper Engine
+                // pausa a animacao do papel de parede enquanto existe uma
+                // janela maximizada, entao a cena ficava parada para sempre
+                // depois do "Mostrar area de trabalho". Nenhum outro programa
+                // faz isso; aqui a janela minimiza, como todo mundo.
+                try
+                {
+                    if (WindowState == FormWindowState.Maximized)
+                    {
+                        WindowState = FormWindowState.Minimized;
+                        Log("Mostrar area de trabalho: a janela minimizou (o papel de parede volta a correr).");
+                        return;
+                    }
+                }
+                catch { }
+                IrParaBandeja();                      // o X sempre manda para a bandeja
                 Log("Ficou na bandeja (clique 2x no \u00edcone para abrir). Bot\u00e3o direito -> Sair para encerrar.");
             };
             ResizeEnd += delegate { try { AplicarTema(); } catch { } };
@@ -4197,8 +4216,22 @@ public static string UrbanGetServers(string accsToken)
             {
                 if (janelaLiberada) return;
                 janelaLiberada = true;
-                if (IsHandleCreated) BeginInvoke((Action)(delegate { try { Show(); } catch { } }));
-                else Show();
+                // Show() sozinho NAO garante a janela na frente: ela estava
+                // nascendo escondida (SetVisibleCore segura ate a tela web
+                // ficar pronta) e, quando aparecia por baixo, ficava ATRAS da
+                // camada do papel de parede - continuava "visivel" para o
+                // Windows, continuava maximizada, mas nao se via. E o
+                // Wallpaper Engine, que pausa a animacao do papel de parede
+                // enquanto existe uma janela maximizada, mantinha a cena
+                // parada. BringToFront + Activate resolvem.
+                if (IsHandleCreated)
+                    BeginInvoke((Action)(delegate
+                    {
+                        try { Show(); } catch { }
+                        try { BringToFront(); } catch { }
+                        try { Activate(); } catch { }
+                    }));
+                else { Show(); try { BringToFront(); } catch { } }
             }
             catch { }
         }
@@ -7767,6 +7800,27 @@ Bitmap MontarFundoCover()
         // ============================================================
         void IrParaBandeja()
         {
+            // A janela estava MAXIMIZADA e vai ser escondida?
+            //
+            // Acontecia toda vez que a pessoa clicava em "Mostrar area de
+            // trabalho": o Windows pedia para fechar, o programa cancelava e
+            // se escondia na bandeja - mas a janela continuava MAXIMIZADA por
+            // dentro (para o Windows, uma janela escondida continua
+            // maximizada: IsZoomed segue valendo). O Wallpaper Engine, que
+            // PAUSA a animacao do papel de parede enquanto existe uma janela
+            // maximizada, via essa janela invisivel e mantinha a cena parada
+            // para sempre. Com qualquer outro programa a cena volta a correr
+            // depois do "Mostrar area de trabalho" - so o Ultra VPN Free nao.
+            //
+            // Antes de esconder, a janela volta ao tamanho normal e a intencao
+            // fica guardada (se a pessoa abrir de novo pelo icone, ela volta
+            // maximizada do mesmo jeito).
+            try
+            {
+                eraMaximizada = (WindowState == FormWindowState.Maximized);
+                if (eraMaximizada) WindowState = FormWindowState.Normal;
+            }
+            catch { }
             Hide();
             tray.Visible = true;
             if (minTray && !balloonOnce)
@@ -7776,11 +7830,16 @@ Bitmap MontarFundoCover()
             }
         }
         bool balloonOnce = false;
+        bool eraMaximizada = false;   // a janela estava maximizada antes de ir para a bandeja
 
         void MostrarDaBandeja()
         {
             Show();
-            WindowState = FormWindowState.Normal;
+            // volta do mesmo jeito que estava: normal, ou maximizada se era
+            // assim quando a janela foi escondida
+            try { WindowState = eraMaximizada ? FormWindowState.Maximized : FormWindowState.Normal; }
+            catch { }
+            eraMaximizada = false;
             Activate();
             tray.Visible = false;
         }
