@@ -61,6 +61,7 @@ window.uvfn_recebe = function (d) {
       case 'seletorAberto': abrirSeletor(d.lista || []); break;
       case 'seletorIcones':  aplicarIconesSeletor(d.icones || []); break;
       case 'seletorErro':    document.getElementById('selMsg').textContent = d.texto || 'erro'; break;
+      case 'versao':     mostrarVersao(d.versao, d.nova); break;
     }
   } catch (e) {
     manda('errojs', { texto: 'uvfn_recebe: ' + e.message });
@@ -472,6 +473,24 @@ if (bRem) bRem.addEventListener('click', function () {
   if (ant) ant.classList.remove('sel');
 });
 ligar('btnDesinst', 'desinstalar');
+ligar('btnNovaVersao', 'abrirAtualizacao');
+
+/* ---------------- versao do programa ----------------
+   O programa manda a versao que esta rodando e, se houver uma MAIOR no
+   GitHub, o numero dela. O botao so existe nessa hora: sem versao nova,
+   ele fica escondido e a tela fica como esta. */
+function mostrarVersao(versao, nova) {
+  var v = document.getElementById('versaoAtual');
+  if (v) v.textContent = versao ? ('versão ' + versao) : '';
+  var b = document.getElementById('btnNovaVersao');
+  if (!b) return;
+  if (nova && nova !== versao) {
+    b.textContent = 'Atualizar para ' + nova;
+    b.style.display = '';
+  } else {
+    b.style.display = 'none';
+  }
+}
 
 document.getElementById('pais').addEventListener('change', function () {
   // a tabela filtra NA HORA; o programa so precisa saber para a conexao

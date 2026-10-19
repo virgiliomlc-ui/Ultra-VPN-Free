@@ -588,7 +588,7 @@ namespace UltraVPN
     // =================================================================
     static class Program
     {
-        public const string Versao = "1.4.0";
+        public const string Versao = "1.5.0";
         public static Mutex Instancia;
         public static bool TrayStart = false;    // -Tray  : abre na bandeja
         public static bool AutoStart = false;    // -Auto  : abre e conecta
@@ -3249,7 +3249,7 @@ public static string UrbanGetServers(string accsToken)
         PictureBox picAlien;
         Label lblSub, lblIP, lblTemas, lblPais, lblProto, lblStatus, lblApps, lblLog;
         ComboBox cboTema, cboCountry, cboProto;
-        Button btnRefresh, btnPing, btnAdd, btnRemove, btnConnect, btnUninstall, btnUpdate;
+        Button btnRefresh, btnPing, btnAdd, btnRemove, btnConnect, btnUninstall;
         ListView lv;
         LbVidro lbApps, lbLog;
         CbVidro chkFull, chkAutoRe, chkStartup, chkBootConn;
@@ -3779,27 +3779,11 @@ public static string UrbanGetServers(string accsToken)
             Controls.Add(btnUninstall);
 
             // ---------------- atualizacao ----------------
-            btnUpdate = new Button();
-            btnUpdate.Text = "Atualiza\u00e7\u00e3o Dispon\u00edvel";
-            btnUpdate.Location = new Point(430, 10);
-            btnUpdate.Size = new Size(191, 28);
-            btnUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            btnUpdate.Visible = false;
-            btnUpdate.Click += delegate
-            {
-                try
-                {
-                    var msg = "Nova vers\u00e3o " + versaoNova + " dispon\u00edvel (a sua \u00e9 a " + Program.Versao + ").\r\n\r\nAbrir a p\u00e1gina para baixar agora?";
-                    var r = MessageBox.Show(this, msg, "Atualiza\u00e7\u00e3o dispon\u00edvel", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-                    if (r == DialogResult.Yes)
-                    {
-                        Log("Abrindo a p\u00e1gina de download da vers\u00e3o " + versaoNova + "...");
-                        Process.Start(Dados.UrlDownload);
-                    }
-                }
-                catch (Exception e) { Log("N\u00e3o deu para abrir o download: " + e.Message); }
-            };
-            Controls.Add(btnUpdate);
+            // NAO existe botao de atualizacao no WinForms de proposito: o
+            // desenho dele e o do Windows antigo (botao cinza com borda), e
+            // destoa de todos os outros, que sao desenhados pela tela. Quem
+            // cuida disso e o botao "Atualizar para 1.6.0" da propria tela
+            // (ui/index.html), que so aparece quando ha versao nova.
 
             // ---------------- log ----------------
             lblLog = new Label();
@@ -3908,8 +3892,7 @@ public static string UrbanGetServers(string accsToken)
                     new object[] { btnPing, vidroCianoNasc, CorBorda, CorTexto },
                     new object[] { btnAdd, Color.FromArgb(120, 62, 96, 100), Color.FromArgb(88, 138, 144), CorTexto },
                     new object[] { btnRemove, vidroAmbarNasc, CorAmbar, CorAmbar },
-                    new object[] { btnUninstall, vidroAmbarNasc, CorAmbar, CorAmbar },
-                    new object[] { btnUpdate, vidroAmbarNasc, CorAmbar, CorAmbar } };
+                    new object[] { btnUninstall, vidroAmbarNasc, CorAmbar, CorAmbar } };
                 foreach (var d in botoesNasc)
                 {
                     var b = (Button)d[0];
@@ -4108,12 +4091,11 @@ public static string UrbanGetServers(string accsToken)
                 Conectar();
             };
             updateTimer = new System.Windows.Forms.Timer();
-            updateTimer.Interval = 1500;
+            updateTimer.Interval = 3 * 60 * 60 * 1000;      // 3 horas
             // a checagem baixa da internet (trava segundos na thread da janela):
             // roda fora dela e so encosta na tela no final
             updateTimer.Tick += delegate {
-
-                try { updateTimer.Stop(); } catch { }
+                ProcurarVersaoNova();
             };
             // REVISITA AS FONTES DE TEMPO EM TEMPO. IP e porta de servidor gratis
             // mudam o dia inteiro (a Argentina responde hoje, o Peru amanha; a
@@ -4185,6 +4167,9 @@ public static string UrbanGetServers(string accsToken)
                 EnviarEstado();
                 EnviarLogAntigo();
                 EnviarIP(currentIP);
+                // a versao que esta rodando (e o botao, se houver versao nova):
+                // a tela so mostra o botao quando o numero do GitHub e maior
+                MandarVersaoParaTela();
             }
             catch (Exception e) { TelaWeb.Rastro("TelaPronta erro: " + e.Message); }
         }
@@ -4468,6 +4453,7 @@ void MandarPaises()
                             return;
                         }
                     case "atualizar": TelaAtualizar(); return;
+                    case "abrirAtualizacao": BaixarAtualizacao(); return;
                     case "medirPing": MedirTudo(true); return;
                     case "mudarPais":
                         {
@@ -5699,12 +5685,11 @@ void MandarPaises()
             }
         }
 
-        // o que o fundo composto tinha quando foi montado (tamanho + tema +
-        // botao de update visivel ou nao): repetindo igual, reaproveita e nao
-        // remonta - na abertura o Load e o Shown pediam o mesmo fundo 2 vezes
+        // o que o fundo composto tinha quando foi montado (tamanho + tema):
+        // repetindo igual, reaproveita e nao remonta - na abertura o Load e o
+        // Shown pediam o mesmo fundo 2 vezes
         int fundoW = 0, fundoH = 0;
         string fundoTema = "";
-        bool fundoUpdate = false;
 
         // So a foto de fundo, no mesmo "cover" que o app.css usa. E o que a janela
 // mostra nos 2,5 s em que o WebView2 ainda nao chegou.
@@ -5749,9 +5734,7 @@ Bitmap MontarFundoCover()
                 if (temaAtual == "goku" && imgFundoGoku == null) { /* cai no liso */ }
                 int w = ClientSize.Width, h = ClientSize.Height;
                 if (w < 200 || h < 200) return null;
-                bool mostraUpdate = false;
-                try { mostraUpdate = btnUpdate != null && btnUpdate.Visible; } catch { }
-                if (imgComp != null && w == fundoW && h == fundoH && temaAtual == fundoTema && mostraUpdate == fundoUpdate) return imgComp;
+                if (imgComp != null && w == fundoW && h == fundoH && temaAtual == fundoTema) return imgComp;
                 var bmp = new Bitmap(w, h);
                 using (var g = Graphics.FromImage(bmp))
                 {
@@ -5804,7 +5787,7 @@ Bitmap MontarFundoCover()
                     object[][] brilhos = new object[][] {
                         new object[] { btnRefresh, CorBorda }, new object[] { btnPing, CorBorda },
                         new object[] { btnAdd, CorCiano }, new object[] { btnRemove, CorAmbar },
-                        new object[] { btnUninstall, CorAmbar }, new object[] { btnUpdate, CorAmbar } };
+                        new object[] { btnUninstall, CorAmbar } };
                     foreach (var par in brilhos)
                     {
                         var b = (Control)par[0];
@@ -5828,7 +5811,7 @@ Bitmap MontarFundoCover()
                         using (var br = new SolidBrush(CorCiano)) g.FillPath(br, cam);
                     }
                 }
-                fundoW = w; fundoH = h; fundoTema = temaAtual; fundoUpdate = mostraUpdate;
+                fundoW = w; fundoH = h; fundoTema = temaAtual;
                 return bmp;
             }
             catch (Exception e) { try { Log("Erro ao montar fundo: " + e.Message); } catch { } return null; }
@@ -5880,8 +5863,7 @@ Bitmap MontarFundoCover()
                 new object[] { btnPing, vidroCiano, CorBorda, CorTexto, sobreCiano },
                 new object[] { btnAdd, Color.FromArgb(120, 62, 96, 100), Color.FromArgb(88, 138, 144), CorTexto, Color.FromArgb(170, 70, 112, 118) },
                 new object[] { btnRemove, vidroAmbar, CorAmbar, CorAmbar, sobreAmbar },
-                new object[] { btnUninstall, vidroAmbar, CorAmbar, CorAmbar, sobreAmbar },
-                new object[] { btnUpdate, vidroAmbar, CorAmbar, CorAmbar, sobreAmbar } };
+                new object[] { btnUninstall, vidroAmbar, CorAmbar, CorAmbar, sobreAmbar } };
             foreach (var d in botoes)
             {
                 var b = (Button)d[0];
@@ -7767,6 +7749,60 @@ Bitmap MontarFundoCover()
         // ============================================================
         //  ATUALIZACAO (versao.txt / atualizacao.txt)
         // ============================================================
+
+        // O botao "Atualizar para 1.6.0" da tela foi clicado: abre a pagina da
+        // release. Se a versao nova nao foi conferida ainda (a tela abriu antes
+        // da consulta acabar), a consulta roda na hora.
+        void BaixarAtualizacao()
+        {
+            try
+            {
+                if (versaoNova == "")
+                {
+                    ProcurarVersaoNova();
+                    Log("Conferindo a versao mais nova no GitHub...");
+                    return;
+                }
+                var msg = "Nova vers\u00e3o " + versaoNova + " dispon\u00edvel (a sua \u00e9 a " + Program.Versao + ").\r\n\r\nAbrir a p\u00e1gina para baixar agora?";
+                var r = MessageBox.Show(this, msg, "Atualiza\u00e7\u00e3o dispon\u00edvel", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (r != DialogResult.Yes) return;
+                Log("Abrindo a p\u00e1gina de download da vers\u00e3o " + versaoNova + "...");
+                Process.Start(Dados.UrlDownload);
+            }
+            catch (Exception e) { Log("N\u00e3o deu para abrir o download: " + e.Message); }
+        }
+
+        // Manda para a tela a versao que esta rodando e, se houver, o numero
+        // da versao maior do GitHub. A tela so mostra o botao no segundo caso.
+        void MandarVersaoParaTela()
+        {
+            try
+            {
+                var d = new Dictionary<string, object>();
+                d["versao"] = Program.Versao;
+                d["nova"] = versaoNova;
+                TelaWeb.Mandar("versao", d);
+            }
+            catch { }
+        }
+
+        // Procura versao nova fora da thread da janela (a consulta de rede
+        // trava segundos). E chamada ao abrir o programa e de tempos em
+        // tempos: o botao de atualizar so aparece - e so diz algo - quando ha
+        // versao nova DE VERDADE, ou seja, quando o numero do GitHub e maior
+        // que o daqui (1.5.0 -> 1.6.0 -> 1.7.0...).
+        void ProcurarVersaoNova()
+        {
+            try
+            {
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try { TestarAtualizacao(); } catch { }
+                });
+            }
+            catch { }
+        }
+
         void TestarAtualizacao()
         {
             versaoNova = "";
@@ -7807,17 +7843,9 @@ Bitmap MontarFundoCover()
                 {
                     try
                     {
-                        if (mostra)
-                        {
-                            btnUpdate.Visible = true;
-                            try { AplicarTema(); } catch { }
-                            Log(texto);
-                        }
-                        else if (btnUpdate.Visible)
-                        {
-                            btnUpdate.Visible = false;
-                            try { AplicarTema(); } catch { }
-                        }
+                        if (mostra) Log(texto);
+                        // a tela e quem mostra o botao "Atualizar para 1.6.0"
+                        MandarVersaoParaTela();
                     }
                     catch { }
                 });
@@ -7930,6 +7958,11 @@ Bitmap MontarFundoCover()
                 AtualizarListaProgramas();
                 Log("Pronto. 1) escolha o t\u00fanel (UDP/TCP), 2) escolha o pa\u00eds, 3) clique em CONECTAR.");
                 if (appList.Count == 0) Log("Dica: clique em \"Adicionar programa...\" e escolhe o Discord (ou outro).");
+
+                // procura versao nova (so aparece o botao se houver mesmo uma
+                // versao maior no GitHub) e passa a conferir de tempos em tempos
+                try { ProcurarVersaoNova(); } catch { }
+                try { updateTimer.Start(); } catch { }
 
                 if (Program.AutoStart)
                 {
