@@ -8340,27 +8340,31 @@ Bitmap MontarFundoCover()
             if (connected)
             {
                 reAuto = 0;
-                // Primeira conexao da sessao: fecha e abre o Discord (se estiver
-                // aberto ou fechado). Nas trocas de servidor seguintes, se o
-                // Discord nao estiver rodando, abre ele.
-                if (!primeiraConexaoFeita)
+                // NAO fecha mais o Discord sozinho ao conectar.
+                //
+                // Era este o segundo jeito de travar o papel de parede do
+                // Wallpaper Engine: o programa matava o Discord na forca
+                // (ele se esconde na bandeja em vez de sair, entao so com
+                // Kill mesmo) e abria de novo. O Discord voltava em janela
+                // maximizada por um instante, e o Wallpaper Engine - que
+                // pausa a animacao enquanto houver janela maximizada - ficava
+                // com a imagem parada mesmo depois de a janela sumir.
+                //
+                // Nao e preciso: as rotas do tunel ja valem para o Discord
+                // aberto (ele continua usando os mesmos enderecos, so que
+                // agora pelo tunel). Se a pessoa quiser recomecar as conexoes
+                // dele, fecha e abre o Discord - ou usa "Reiniciar Discord" no
+                // menu do icone.
+                try
                 {
-                    primeiraConexaoFeita = true;
-                    ReiniciarOuAbrirDiscord();
+                    int nDis = 0;
+                    try { nDis = Process.GetProcessesByName("Discord").Length; } catch { }
+                    if (nDis == 0)
+                        Log("Conectado. Se o Discord nao estiver aberto, ele entra pela VPN assim que abrir.");
+                    else
+                        Log("Conectado. O Discord continua aberto e ja passa pela VPN (o texto volta em segundos).");
                 }
-                else
-                {
-                    // Discord ja esta aberto? Nao faz nada - ele reconecta sozinho.
-                    // Se nao estiver rodando, abre.
-                    try
-                    {
-                        if (Process.GetProcessesByName("Discord").Length == 0)
-                            ReiniciarOuAbrirDiscord();
-                        else
-                            Log("Discord continua aberto - ele percebe a troca e reconecta sozinho pelo tunel novo (o texto volta em segundos).");
-                    }
-                    catch { }
-                }
+                catch { }
             }
             else if (autoRecon && reAuto > 0)
             {
