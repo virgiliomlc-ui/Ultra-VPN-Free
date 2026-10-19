@@ -8554,6 +8554,7 @@ Bitmap MontarFundoCover()
                         break;
                     }
                 }
+                discordAbertoEm = DateTime.Now; discordTeveFoco = false; ticksDiscord = 0;
                 Log("Discord reaberto pelo tunel.");
             }
             catch { }
@@ -8605,6 +8606,7 @@ Bitmap MontarFundoCover()
         bool DiscordSobOlho = false;      // ligado depois da 1a conexao
         int ticksDiscord = 0;             // quantas vezes ficou sem foco
         bool discordTeveFoco = false;     // ja esteve em foco nesta sessao
+        DateTime discordAbertoEm = DateTime.MinValue;   // quando o programa reabriu ele
         System.Windows.Forms.Timer discoTimer;
 
         // started junto with the program: the check is fast so that the
@@ -8633,22 +8635,30 @@ Bitmap MontarFundoCover()
                 if (EstaMinimizado(j) || !EhMaximizado(j)) { ticksDiscord = 0; discordTeveFoco = false; return; }
                 var frente = GetForegroundWindow();
                 if (frente == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
-                // 1) A PESSOA ESTA NA AREA DE TRABALHO: o Windows nao
-                // minimiza o Discord (janela de Chromium, igual a nossa tela)
-                // e o Wallpaper Engine continua vendo uma janela maximizada.
-                // Aqui minimiza na hora - semespera nenhuma.
+
+                // REGRA DE OURO: so mexe no Discord quando a PESSOA saiu de
+                // uma janela que ja esteve em foco. Assim o programa nao
+                // atrapalha o momento em que ele abre (o Electron ainda esta
+                // brigando com o foco) nem quem maximiza em segundo plano.
+                if (!discordTeveFoco) return;
+                // nem nos primeiros segundos depois de o programa abrir ele:
+                // nesse instante quem devolve o Discord ao estado em que a
+                // pessoa deixou ainda e o proprio programa
+                if ((DateTime.Now - discordAbertoEm).TotalSeconds < 8) return;
+
+                // A PESSOA ESTA NA AREA DE TRABALHO: o Windows nao minimiza
+                // o Discord (e janela de Chromium, igual a nossa tela) e o
+                // Wallpaper Engine continua vendo uma janela maximizada.
                 if (EhAreaDeTrabalho(frente))
                 {
                     MostrarJanela(j, 6);   // SW_MINIMIZE
                     ticksDiscord = 0;
+                    discordTeveFoco = false;
                     return;
                 }
-                // 2) saida de cena normal: so minimiza se a janela ja esteve
-                // em foco (maximizar em segundo plano, sem focar, nao e
-                // mexido - seria atrapalhar a pessoa).
-                if (!discordTeveFoco) return;
+                // saida de cena comum: minimiza em ~200 ms
                 ticksDiscord++;
-                if (ticksDiscord >= 2)          // ~200 ms
+                if (ticksDiscord >= 2)
                 {
                     ticksDiscord = 0;
                     MostrarJanela(j, 6);
