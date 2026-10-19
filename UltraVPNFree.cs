@@ -4052,6 +4052,11 @@ public static string UrbanGetServers(string accsToken)
             };
 
             // ---------------- timers ----------------
+            // Vigia do Discord: precisa nascer AQUI, na thread da janela. Um
+            // timer do WinForms criado em outra thread (a de trabalho, que e
+            // onde a conexao acontece) nunca dispara, porque la nao tem laco de
+            // mensagens.
+            LigarVigiaDoDiscord();
             pollTimer = new System.Windows.Forms.Timer();
             pollTimer.Interval = 400;
             pollTimer.Tick += delegate { try { CicloRapido(); } catch { } };
@@ -7367,9 +7372,6 @@ Bitmap MontarFundoCover()
         {
             vigiaTick = (vigiaTick + 1) % 15;
             if (vigiaTick == 5) { try { EscurecerRolagens(); } catch { } }
-            // o Discord tambem e uma janela que nao obedece ao "Mostrar area
-            // de trabalho" (e uma janela do Chromium, como a nossa tela)
-            try { CuidarDoDiscord(); } catch { }
             if (connected && btnConnect.Enabled)
             {
                 if (vigiaTick == 0)
@@ -8534,28 +8536,45 @@ Bitmap MontarFundoCover()
                 //   - estava normal       -> volta normal
                 //   - estava minimizado   -> volta minimizado
                 //   - estava fechado      -> fica minimizado, na barra
-                if (!estavaMaximizado)
+                // Repete a conferencia por alguns segundos porque o Electron mexe no
+                // tamanho da janela sozinho logo depois de abrir: se ele
+                // maximizar sozinho, a pessoa perde a imagem do papel de
+                // parede de vista; se abrir minimizado, ela perde o Discord
+                // de vista. A conversa para assim que a janela estiver como a
+                // pessoa deixou.
+                for (int i = 0; i < 30; i++)
                 {
-                    for (int i = 0; i < 150; i++)
+                    System.Threading.Thread.Sleep(100);
+                    var j = JanelaDiscord();
+                    if (j == IntPtr.Zero) continue;
+                    try
                     {
-                        System.Threading.Thread.Sleep(100);
-                        var j = JanelaDiscord();
-                        if (j == IntPtr.Zero) continue;
-                        try
+                        if (!estavaAberto || estavaMinimizado)
                         {
-                            if (!estavaAberto || estavaMinimizado)
-                            {
-                                if (!EstaMinimizado(j)) MostrarJanela(j, 6);   // SW_MINIMIZE
-                            }
-                            else if (EhMaximizado(j))
-                            {
-                                MostrarJanela(j, 9);                             // SW_RESTORE
-                            }
+                            if (!EstaMinimizado(j)) MostrarJanela(j, 6);   // SW_MINIMIZE
+                            break;                                          // e o que ela deixou
                         }
-                        catch { }
-                        break;
+                        if (EstaMinimizado(j))
+                        {
+                            MostrarJanela(j, 9);                           // ela NAO deixou minimizado
+                            continue;
+                        }
+                        if (EhMaximizado(j) != estavaMaximizado)
+                        {
+                            // ela deixou maximizado -> maximiza de volta;
+                            // ela deixou normal -> tira o maximizado que o
+                            // Electron colocou sozinho
+                            if (estavaMaximizado) MostrarJanela(j, 3);     // SW_MAXIMIZE
+                            else MostrarJanela(j, 9);                      // SW_RESTORE
+                            continue;
+                        }
+                        break;                                             // ja esta como ela deixou
                     }
+                    catch { break; }
                 }
+                discordAbertoEm = DateTime.Now;   // a vigia espera a calma da reabertura
+                discordTeveFoco = false;
+                ticksDiscord = 0;
                 Log("Discord reaberto pelo tunel.");
             }
             catch { }
@@ -8605,8 +8624,26 @@ Bitmap MontarFundoCover()
         // minimiza de verdade. So para quando a pessoa deixa de maximiza-lo
         // por conta propria.
         bool DiscordSobOlho = false;      // ligado depois da 1a conexao
-        int ticksDiscord = 0;             // quantas vezes ficou sem foco
-        bool discordTeveFoco = false;     // ja esteve em foco nesta sessao
+        int ticksDiscord = 0;             // amostras seguidas com a tela embora na frente
+        bool discordTeveFoco = false;     // a pessoa ja usou o Discord nesta sessao
+        DateTime discordAbertoEm = DateTime.MinValue;   // quando o programa reabriu o Discord
+        System.Windows.Forms.Timer discoTimer;
+
+        // Vigia rapida, num timer proprio (10 vezes por segundo): a nossa
+        // janela minimiza na hora e o papel de parede volta a girar na hora -
+        // o Discord precisa fazer o mesmo.
+        void LigarVigiaDoDiscord()
+        {
+            try
+            {
+                if (discoTimer != null) return;
+                discoTimer = new System.Windows.Forms.Timer();
+                discoTimer.Interval = 100;
+                discoTimer.Tick += delegate { try { CuidarDoDiscord(); } catch { } };
+                discoTimer.Start();
+            }
+            catch { }
+        }
 
         void CuidarDoDiscord()
         {
@@ -8615,21 +8652,61 @@ Bitmap MontarFundoCover()
                 if (!DiscordSobOlho) return;
                 var j = JanelaDiscord();
                 if (j == IntPtr.Zero) { ticksDiscord = 0; discordTeveFoco = false; return; }
-                if (EstaMinimizado(j) || !EhMaximizado(j)) { ticksDiscord = 0; discordTeveFoco = false; return; }
-                if (GetForegroundWindow() == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
-                // so minimiza se a janela JA esteve em foco e a pessoa saiu
-                // dela de proposito (clicou na area de trabalho, em outro
-                // programa...). Maximizar em segundo plano, sem focar, nao e
-                // mexido - seria atrapalhar a pessoa.
+                if (EstaMinimizado(j) || !EhMaximizado(j))
+                {
+                    ticksDiscord = 0; discordTeveFoco = false; return;
+                }
+                var frente = GetForegroundWindow();
+                if (frente == j) { ticksDiscord = 0; discordTeveFoco = true; return; }
+
+                // TRES condicoes, e so nestas:
+                //  1) a pessoa ja usou o Discord (ele esteve em foco) - senao a
+                //     gente atrapalha quem maximiza em segundo plano;
+                //  2) ja passou a calma da reabertura - nesse instante quem
+                //     devolve o Discord ao estado em que a pessoa deixou ainda
+                //     e o proprio programa;
+                //  3) a pessoa mandou a tela embora ("Mostrar area de
+                //     trabalho"), e NAO apenas trocou de programa.
+                //
+                // A 3a e a que faltava: sem ela a vigia minimizava o Discord
+                // sempre que a pessoa ia para outro programa - e a primeira
+                // coisa que a gente faz depois de conectar e levar a janela do
+                // VPN para a frente. O resultado era o Discord voltando
+                // minimizado,contrariando o estado em que a pessoa deixou.
                 if (!discordTeveFoco) return;
+                if ((DateTime.Now - discordAbertoEm).TotalSeconds < 6) return;
+                if (!EhAreaDeTrabalho(frente)) { ticksDiscord = 0; return; }
+
+                // 2 amostras de 100 ms: 200 ms, imperceptivel, e nao deixa
+                // passar o piscar de foco da troca de janela
                 ticksDiscord++;
-                if (ticksDiscord >= 3)
+                if (ticksDiscord >= 2)
                 {
                     ticksDiscord = 0;
                     MostrarJanela(j, 6);   // SW_MINIMIZE
                 }
             }
             catch { }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int GetClassName(IntPtr h, System.Text.StringBuilder t, int n);
+
+        // A area de trabalho na frente (ou a barra de tarefas, onde mora o
+        // botao "Mostrar area de trabalho"): e o aviso de que a pessoa mandou
+        // a tela toda embora.
+        static bool EhAreaDeTrabalho(IntPtr frente)
+        {
+            try
+            {
+                if (frente == IntPtr.Zero) return true;
+                var sb = new System.Text.StringBuilder(64);
+                GetClassName(frente, sb, 64);
+                var c = sb.ToString();
+                return c == "Progman" || c == "WorkerW" || c == "Desktop"
+                    || c == "ShellDesktop" || c == "Shell_TrayWnd";
+            }
+            catch { return false; }
         }
 
         void AtualizarEstadoConexao()
