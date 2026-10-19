@@ -4052,6 +4052,11 @@ public static string UrbanGetServers(string accsToken)
             };
 
             // ---------------- timers ----------------
+            // Vigia do Discord: precisa nascer AQUI, na thread da janela. Um
+            // timer do WinForms criado em outra thread (a de trabalho, que e
+            // onde a conexao acontece) nunca dispara, porque la nao tem laco de
+            // mensagens - e era exatamente por isso que a vigia ficava parada.
+            LigarVigiaDoDiscord();
             pollTimer = new System.Windows.Forms.Timer();
             pollTimer.Interval = 400;
             pollTimer.Tick += delegate { try { CicloRapido(); } catch { } };
@@ -8356,7 +8361,6 @@ Bitmap MontarFundoCover()
                 {
                     primeiraConexaoFeita = true;
                     DiscordSobOlho = true;   // passa a cuidar da janela do Discord
-                    try { LigarVigiaDoDiscord(); } catch { }
                     ReiniciarOuAbrirDiscord();
                 }
                 else
