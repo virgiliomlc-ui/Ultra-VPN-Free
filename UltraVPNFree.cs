@@ -3966,6 +3966,34 @@ public static string UrbanGetServers(string accsToken)
                 estadoJanela = WindowState;
                 if (WindowState != FormWindowState.Minimized) { try { AplicarTema(); } catch { } }
             };
+            // ============================================================
+            //  PERDEU O FOCO COM A JANELA MAXIMIZADA -> MINIMIZA
+            // ============================================================
+            // Descoberto com o rastreio ligado: quando a pessoa clica em
+            // "Mostrar area de trabalho", o Windows NAO envia comando nenhum
+            // para esta janela - ela nao minimiza, nao fecha, nao chega
+            // WM_SYSCOMMAND. O Windows continua achando que existe aqui uma
+            // janela MAXIMIZADA (visivel=true, IsZoomed=true), so que ela
+            // deixa de aparecer na tela. E o Wallpaper Engine, que pausa a
+            // animacao do papel de parede enquanto houver uma janela
+            // maximizada, fica esperando para sempre: a imagem fica estatica.
+            // Nenhum outro programa sofre com isso.
+            //
+            // O conserto e o comportamento normal de qualquer janela maxima:
+            // ao sair de cena (clique em outro programa, mostrar a area de
+            // trabalho, minimizar), ela minimiza de verdade.
+            Deactivate += delegate
+            {
+                try
+                {
+                    if (saindo || disposing) return;
+                    if (WindowState == FormWindowState.Maximized)
+                    {
+                        WindowState = FormWindowState.Minimized;
+                    }
+                }
+                catch { }
+            };
             Shown += delegate { AoAbrirJanela(); };
             Load += delegate
             {
@@ -4032,16 +4060,14 @@ public static string UrbanGetServers(string accsToken)
             // netstat + DNS + route.exe travam a janela a cada ciclo: o vigia colhe
             // fora da thread dela (so ele mexe nas rotas; a tela e avisada
             // por BeginInvoke onde precisa)
-            watch.Tick += delegate
-            {
+            watch.Tick += delegate {
                 IniciarChecagemIP();
                 if (connected) ThreadPool.QueueUserWorkItem(delegate { try { SincronizarRotas(); } catch { } });
             };
             rtimer = new System.Windows.Forms.Timer();
             rtimer.Interval = 4000;
-            rtimer.Tick += delegate
-            {
-                if (connected) ThreadPool.QueueUserWorkItem(delegate { try { SincronizarRotas(); } catch { } });
+            rtimer.Tick += delegate {
+
             };
             reconTimer = new System.Windows.Forms.Timer();
             reconTimer.Interval = 6000;
@@ -4080,10 +4106,9 @@ public static string UrbanGetServers(string accsToken)
             updateTimer.Interval = 1500;
             // a checagem baixa da internet (trava segundos na thread da janela):
             // roda fora dela e so encosta na tela no final
-            updateTimer.Tick += delegate
-            {
+            updateTimer.Tick += delegate {
+
                 try { updateTimer.Stop(); } catch { }
-                ThreadPool.QueueUserWorkItem(delegate { try { TestarAtualizacao(); } catch { } });
             };
             // REVISITA AS FONTES DE TEMPO EM TEMPO. IP e porta de servidor gratis
             // mudam o dia inteiro (a Argentina responde hoje, o Peru amanha; a
@@ -11256,3 +11281,4 @@ string pr = pp.Length > 1 ? pp[1] : "udp";
         }
     }
 }
+
